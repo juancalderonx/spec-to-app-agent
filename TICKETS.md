@@ -280,6 +280,15 @@ the architecture document says why it is shaped that way.
   and updates the surface manifest from what it wrote. One task per visit. Does
   **not** receive the whole manifest — only the signatures of the current
   task's direct dependencies — and does **not** run validation.
+- **Note:** T-09's follow-up fix widened what `dependsOn` carries. Besides the
+  tasks whose exports a task imports, it now also carries the handler task for
+  any operation the task issues at runtime — an ordering edge with no import
+  behind it. This node injects the signatures of the direct dependencies only,
+  so it has to decide which reading it uses: inject the handler file's signature
+  alongside the rest, or filter out the edges that exist only for ordering.
+  Decide it deliberately and say which in the commit. Deciding nothing means the
+  hook's prompt carries `src/mocks/handlers.ts`, whose whole surface is one
+  exported array — cheap, but arrived at by accident.
 - **Acceptance criteria:**
   - [ ] A run over a reduced single-task spec writes the expected file and the
         output directory still passes `npm run typecheck`
@@ -451,6 +460,14 @@ the architecture document says why it is shaped that way.
   planner produced, what came out green, and what did not. Does **not** edit
   any prompt or pack to make the variant succeed — a change made for the
   variant invalidates the test it exists to perform.
+- **Note:** Expect orphaned scaffolding, and report it rather than fixing it. A
+  specification that needs fewer operations than the provided project ships
+  leaves the previous domain's type, its operations, its mock data and handlers,
+  and the provider wiring in `src/main.tsx` behind as dead code, because no task
+  claims them. Nothing breaks and the type check passes, but the previous domain
+  stays legible in the output. Removing it would mean giving the planner
+  authority to delete files, which is a larger decision than this ticket makes:
+  `docs/generalization.md` is where it gets written down.
 - **Acceptance criteria:**
   - [ ] The run completes using the same agent build committed in T-15, with
         only the spec and output path changed
