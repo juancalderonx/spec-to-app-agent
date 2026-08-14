@@ -4,8 +4,13 @@ import { generate } from "../nodes/generate.ts";
 import { order } from "../nodes/order.ts";
 import { plan } from "../nodes/plan.ts";
 import { prepare } from "../nodes/prepare.ts";
+import { repair } from "../nodes/repair.ts";
 import { validate } from "../nodes/validate.ts";
-import { routeAfterOrder } from "./routers.ts";
+import {
+  MAX_REPAIRS_PER_TASK,
+  routeAfterOrder,
+  routeAfterValidate,
+} from "./routers.ts";
 import { AgentStateAnnotation, type AgentState } from "./state.ts";
 
 /**
@@ -22,12 +27,21 @@ export interface RunOptions {
 const DEFAULT_RUN_OPTIONS: RunOptions = { provider: DEFAULT_PROVIDER, model: undefined };
 
 /**
- * Supersteps one task is allowed to cost: the `generate` and `validate` visits
- * it costs today, plus the two repair visits T-13 bounds it to. Budgeting for
- * those now costs nothing and spares a later run being cut off mid-queue by a
- * limit nobody thought about.
+ * Supersteps one task is allowed to cost, in the worst case: one `generate`,
+ * then `R` repairs, and a `validate` after each of them as well as after the
+ * generate.
+ *
+ *     1 + R + (1 + R) = 2 + 2R,  R = MAX_REPAIRS_PER_TASK
+ *
+ * The formula rather than the number it evaluates to, so that raising a ceiling
+ * raises the budget with it instead of silently cutting a run off mid-queue.
+ *
+ * This over-budgets on purpose. `MAX_REPAIRS_PER_RUN` caps repairs across the
+ * whole run well below `tasks × R`, so no real run can reach `tasks × (2 + 2R)`
+ * — but a budget is the wrong place to bet on that, since being wrong costs a
+ * whole run and being generous costs nothing.
  */
-const STEPS_PER_TASK = 4;
+const STEPS_PER_TASK = 2 + 2 * MAX_REPAIRS_PER_TASK;
 
 /** `prepare`, `plan`, `order`, `review`, `report`, and one spare. */
 const FIXED_STEPS = 6;
@@ -37,9 +51,10 @@ export const MAX_PLAN_TASKS = 40;
 
 /**
  * What `invoke` is given instead of the library's default of 25, which the
- * queue outgrows at 11 tasks now that each one costs a `generate` and a
- * `validate` visit. The loop cannot run away on its own — `cursor` only ever
- * increases and `routeAfterValidate` stops at the end of the queue — so this is
+ * queue outgrows within a handful of tasks now that each one costs a `generate`,
+ * a `validate` and possibly a repair round. The loop cannot run away on its own
+ * — `cursor` only ever increases, every repair charges an attempt against two
+ * ceilings, and `routeAfterValidate` stops at the end of the queue — so this is
  * the guard on a plan larger than this agent is built for, not on a cycle.
  */
 export const RECURSION_LIMIT = FIXED_STEPS + MAX_PLAN_TASKS * STEPS_PER_TASK;
@@ -65,19 +80,6 @@ function routeAfterPrepare(state: AgentState): "plan" | "report" {
   return state.errors.length > 0 ? "report" : "plan";
 }
 
-/**
- * One task per visit, so the generator comes back until the queue is spent.
- *
- * Temporary in this shape: it asks only whether the queue has more, because
- * nothing repairs yet. T-13 moves it to `agent/src/graph/routers.ts` with the
- * two branches that read `errors` — the repair loop and the degradation path —
- * and takes the cursor advance over from `generate`. The loop is already the
- * one the architecture draws; its middle is what grows.
- */
-function routeAfterValidate(state: AgentState): "generate" | "report" {
-  return state.cursor < state.orderedTaskIds.length ? "generate" : "report";
-}
-
 export function buildGraph(options: RunOptions = DEFAULT_RUN_OPTIONS) {
   return new StateGraph(AgentStateAnnotation)
     .addNode("prepare", prepare)
@@ -95,13 +97,20 @@ export function buildGraph(options: RunOptions = DEFAULT_RUN_OPTIONS) {
     // Called with the state alone: the node's second parameter is the command
     // runner its tests replace, and the graph would otherwise hand it a config.
     .addNode("validate", (state) => validate(state))
+    .addNode("repair", (state) => {
+      // The coder role, deliberately: the file being corrected is one this same
+      // role wrote, against the same standing constraints and the same prefix.
+      const { provider, model } = options;
+      return repair(state, createModel({ provider, role: "coder", model }));
+    })
     .addNode("report", report)
     .addEdge(START, "prepare")
     .addConditionalEdges("prepare", routeAfterPrepare, ["plan", "report"])
     .addEdge("plan", "order")
     .addConditionalEdges("order", routeAfterOrder, ["generate", "report"])
     .addEdge("generate", "validate")
-    .addConditionalEdges("validate", routeAfterValidate, ["generate", "report"])
+    .addConditionalEdges("validate", routeAfterValidate, ["repair", "generate", "report"])
+    .addEdge("repair", "validate")
     .addEdge("report", END)
     .compile();
 }

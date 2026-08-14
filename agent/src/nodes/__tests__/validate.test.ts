@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, test } from "node:test";
-import type { AgentState, Task } from "../../graph/state.ts";
+import { MAX_REPAIRS_PER_TASK } from "../../graph/routers.ts";
+import type { AgentState, Task, UsageEntry } from "../../graph/state.ts";
+import type { ModelClient } from "../../llm/factory.ts";
 import type { CommandResult } from "../../tools/shell.ts";
+import { generate } from "../generate.ts";
 import { validate, type CommandRunner } from "../validate.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..");
@@ -102,7 +105,8 @@ test("reports the type errors of the file just written, naming file and line", a
   assert.equal(result.errors?.[0]?.file, "src/components/InventoryList.tsx");
   assert.equal(result.errors?.[0]?.line, 18);
   assert.equal(result.errors?.[0]?.source, "tsc");
-  // Reporting is the whole job: what to do about it is T-13's.
+  // The task keeps its `pending` status: it still has repair budget, so these
+  // errors are not its last word.
   assert.equal(result.status, undefined);
 });
 
@@ -189,4 +193,171 @@ test("runs both signals when it cannot tell which task finished", async () => {
 
   assert.deepEqual(called, ["typecheck", "test"]);
   assert.equal(result.log?.[0]?.event, "unattributed");
+});
+
+test("marks a task done when both signals come back clean", async () => {
+  const runId = "test-validate-done";
+  const outputDir = await workspace(runId);
+  const { run } = runner({});
+
+  const result = await validate(stateFor(runId, outputDir, [task()]), run);
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.status?.["list-panel"], "done");
+});
+
+/**
+ * The rollback is the only destructive path in the agent and it runs without
+ * asking anyone, so it is worth pinning from both sides: that it happens when
+ * the budget is gone, and — the direction that fails silently — that it does
+ * not happen a moment before.
+ *
+ * `generate` runs first rather than the snapshot being planted, because the
+ * snapshot is its private bookkeeping and a test that reached around it would
+ * keep passing against a node that had stopped taking them.
+ */
+const OVERWRITTEN = "export default function ListPanel() {\n  return null;\n}\n";
+const SHIPPED = "export default function ListPanel() {\n  return unchanged;\n}\n";
+
+/**
+ * Type-checker output blaming the file the task in flight owns.
+ *
+ * Written out rather than taken from the fixtures, which name a file of their
+ * own: a rollback is only ever warranted by a failure in the task's own file,
+ * so a test of one has to produce that failure and not merely a red exit.
+ */
+function ownFailure(): CommandResult {
+  return failing(
+    "src/components/ListPanel.tsx(2,10): error TS2345: " +
+      "Argument of type 'string' is not assignable to parameter of type 'Item'.",
+    2,
+  );
+}
+
+/** No provider is reached: `generate` is here to take the snapshot, not to think. */
+function coder(): ModelClient {
+  const spent: UsageEntry = {
+    node: "generate",
+    role: "coder",
+    model: "stub",
+    inputTokens: 0,
+    cachedReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    costUsd: 0,
+  };
+  return {
+    modelId: "stub",
+    cacheable: (text) => ["human", text],
+    invoke: () => Promise.reject(new Error("unused")),
+    invokeStructured: () => Promise.resolve({ value: { contents: OVERWRITTEN }, usage: spent }),
+  };
+}
+
+/** A run whose one task has overwritten a file the project shipped. */
+async function afterOverwriting(runId: string, outputDir: string): Promise<AgentState> {
+  await mkdir(join(outputDir, "src/components"), { recursive: true });
+  await writeFile(join(outputDir, "src/components/ListPanel.tsx"), SHIPPED, "utf8");
+
+  const before = stateFor(runId, outputDir, [task()], 0);
+  const shipped = { "src/components/ListPanel.tsx": { exports: [] } };
+  const written = await generate({ ...before, surface: shipped }, coder());
+
+  return { ...before, surface: shipped, cursor: written.cursor ?? 1 };
+}
+
+test("leaves the disk alone while the failing task still has repair budget", async () => {
+  const runId = "test-validate-no-rollback";
+  const outputDir = await workspace(runId);
+  const state = await afterOverwriting(runId, outputDir);
+  const { run } = runner({ typecheck: ownFailure() });
+
+  // One attempt short of the ceiling: the last visit on which reverting would
+  // be wrong, which is the visit an off-by-one gets wrong.
+  const result = await validate(
+    { ...state, attempts: { "list-panel": MAX_REPAIRS_PER_TASK - 1 } },
+    run,
+  );
+
+  // Not settled, and above all not reverted: the repair has not happened yet.
+  assert.equal(
+    await readFile(join(outputDir, "src/components/ListPanel.tsx"), "utf8"),
+    OVERWRITTEN,
+  );
+  assert.equal(result.status, undefined);
+  assert.ok((result.errors?.length ?? 0) > 0);
+});
+
+test("restores what the task overwrote once its repair budget is spent", async () => {
+  const runId = "test-validate-rollback";
+  const outputDir = await workspace(runId);
+  const state = await afterOverwriting(runId, outputDir);
+  const { run } = runner({ typecheck: ownFailure() });
+
+  const result = await validate(
+    { ...state, attempts: { "list-panel": MAX_REPAIRS_PER_TASK } },
+    run,
+  );
+
+  assert.equal(await readFile(join(outputDir, "src/components/ListPanel.tsx"), "utf8"), SHIPPED);
+  assert.equal(result.status?.["list-panel"], "failed");
+  // Cleared: they describe a file that has just been put back. The cause
+  // survives in the log, which is where a reader goes looking for it.
+  assert.deepEqual(result.errors, []);
+  const abandoned = result.log?.find((entry) => entry.event === "abandoned");
+  assert.match(abandoned?.detail ?? "", /list-panel/);
+  assert.match(abandoned?.detail ?? "", /TS2345/);
+});
+
+/**
+ * The failure this ticket nearly shipped. A task of type `test` runs the whole
+ * suite, the suite carries every earlier task's tests, and a regression one task
+ * caused comes back red on a later one. Nothing in that error names the file the
+ * later task owns, so no repair it could attempt would reach it — and the task
+ * would be reverted and marked failed for breakage it never caused.
+ */
+test("neither reverts nor blames a task whose failure names no file it owns", async () => {
+  const runId = "test-validate-not-attributable";
+  const outputDir = await workspace(runId);
+  const state = await afterOverwriting(runId, outputDir);
+  // A red suite, and every failure belongs to a file this task does not own.
+  const { run } = runner({ test: failing(fixture("test-failure")) });
+
+  const result = await validate(
+    { ...state, attempts: { "list-panel": MAX_REPAIRS_PER_TASK } },
+    run,
+  );
+
+  // Budget spent, and still nothing is destroyed: the file this task wrote
+  // stands, and the task is not accused of a failure it cannot answer.
+  assert.equal(
+    await readFile(join(outputDir, "src/components/ListPanel.tsx"), "utf8"),
+    OVERWRITTEN,
+  );
+  assert.equal(result.status, undefined);
+  // The errors survive: unlike a rollback, nothing here made them obsolete —
+  // the workspace really is broken, by a file with another owner.
+  assert.ok((result.errors?.length ?? 0) > 0);
+  const skipped = result.log?.find((entry) => entry.event === "not-attributable");
+  assert.match(skipped?.detail ?? "", /InventoryList\.test\.tsx/);
+});
+
+test("deletes a file the failed task created, rather than leaving it behind", async () => {
+  const runId = "test-validate-rollback-create";
+  const outputDir = await workspace(runId);
+  const created = join(outputDir, "src/components/ListPanel.tsx");
+
+  // No surface entry, so the file did not exist before: the snapshot holds `null`.
+  const before = stateFor(runId, outputDir, [task()], 0);
+  const written = await generate(before, coder());
+  assert.equal(existsSync(created), true);
+
+  const { run } = runner({ typecheck: ownFailure() });
+  const result = await validate(
+    { ...before, cursor: written.cursor ?? 1, attempts: { "list-panel": MAX_REPAIRS_PER_TASK } },
+    run,
+  );
+
+  assert.equal(existsSync(created), false);
+  assert.equal(result.status?.["list-panel"], "failed");
 });

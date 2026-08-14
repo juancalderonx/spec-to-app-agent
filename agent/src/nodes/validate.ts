@@ -1,9 +1,11 @@
 import { join, resolve } from "node:path";
+import { attributable, repairable, taskInFlight } from "../graph/routers.ts";
 import type { AgentState, BuildError, LogEntry, Task } from "../graph/state.ts";
-import { openSandbox, type Sandbox } from "../tools/fs.ts";
+import { openSandbox, removeFileIn, writeFileIn, type Sandbox } from "../tools/fs.ts";
 import { runCommand, type CommandResult } from "../tools/shell.ts";
 import { openTrace } from "../tools/trace.ts";
 import { foundNoTestFiles, parseTests, parseTypecheck } from "../validate/parsers.ts";
+import { snapshotsFor } from "./generate.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 
@@ -27,9 +29,17 @@ export type CommandRunner = (sandbox: Sandbox, name: string) => Promise<CommandR
  * they disagree by construction — a test relying on the runner's globals passes
  * the suite and fails the type check.
  *
- * Nothing here repairs, and nothing here settles a task: `status` belongs to
- * T-13, which is what decides whether these errors are worth another attempt.
- * This node reports and stops.
+ * Nothing here repairs, but this node does settle the task it judged, because
+ * it is the only one that runs on every path out of a validation: clean, it
+ * writes `status: "done"`; failed on its own file with no repair budget left,
+ * it rolls the task back and writes `status: "failed"`. The edge cannot do
+ * either — a conditional edge is a pure function from state to a node name —
+ * and the predicates it would have to consult are `attributable` and
+ * `repairable`, so both ask the same questions of the same functions and cannot
+ * disagree.
+ *
+ * A red validation naming no file this task owns settles nothing and reverts
+ * nothing: see `unattributable`.
  *
  * `errors` is overwritten each visit, so what it holds afterwards is the latest
  * validation and not the run's verdict — a failure recorded against an earlier
@@ -43,7 +53,7 @@ export async function validate(
   const log: LogEntry[] = [];
   const trace = openTrace(join(REPO_ROOT, "agent", "runs", state.runId, "tools.jsonl"));
 
-  const task = completedTask(state);
+  const task = taskInFlight(state);
   // Errors that name no file of their own are attributed to what was just
   // written, which is the file a repair would open.
   const subject = task?.targetPath ?? state.outputDir;
@@ -81,27 +91,112 @@ export async function validate(
     log.push(record("tests-skipped", `${task.id} touched no test file and others remain queued`));
   }
 
-  return { errors, log };
+  if (task === undefined) {
+    return { errors, log };
+  }
+  if (errors.length === 0) {
+    return { errors, status: { ...state.status, [task.id]: "done" }, log };
+  }
+  if (!attributable({ ...state, errors })) {
+    return { errors, log: [...log, record("not-attributable", unattributable(task, errors))] };
+  }
+  if (repairable(state)) {
+    // Not the last word: the edge is about to send this to `repair`, and the
+    // task keeps its `pending` status until one of us runs out of budget.
+    return { errors, log };
+  }
+  return abandon(state, task, sandbox, errors, log);
 }
 
 /**
- * The task `generate` has just finished.
+ * What a task is told when its validation is red and no error names its file.
  *
- * It advances the cursor on its way out, so the finished task sits one behind —
- * T-13 moves that advance onto the edge leaving this node, and this becomes
- * `orderedTaskIds[cursor]`. The position is checked rather than assumed:
- * arithmetic that is only correct because of where a node sits in the graph is
- * exactly what breaks when the graph changes, and reading past the end here
- * would validate one task's output against another task's expectations without
- * saying so.
+ * It is neither settled nor rolled back, and it spends no repair budget: the
+ * failure is real but it is not this task's to answer, and reverting a file that
+ * nothing complained about would destroy correct work and blame the wrong task
+ * for the breakage. `status` stays `pending`, which is the honest reading — the
+ * task was attempted and its validation never came back clean about anything it
+ * owns — and `errors` is kept, because unlike a rollback nothing here has made
+ * them obsolete: the workspace really is broken, by a file with another owner.
+ *
+ * The run therefore still exits non-zero through `runVerdict`, which counts
+ * errors no task owns, and the queue carries on. This is the attribution gap the
+ * conditional test rule creates, handled where it surfaces.
  */
-function completedTask(state: AgentState): Task | undefined {
-  const position = state.cursor - 1;
-  if (position < 0 || position >= state.orderedTaskIds.length) {
-    return undefined;
+function unattributable(task: Task, errors: BuildError[]): string {
+  const elsewhere = [...new Set(errors.map((error) => error.file))].sort();
+  return (
+    `${task.id} owns ${task.targetPath}, which no error names · ` +
+    `the failure is in ${elsewhere.join(", ")} · ` +
+    `advancing without repair: this task cannot rewrite those files`
+  );
+}
+
+/**
+ * Puts a task that ran out of repair budget back where it was, and says so.
+ *
+ * `errors` comes back **empty**, which is the part worth arguing. It describes
+ * a file that no longer exists in the shape that produced them — the rollback
+ * has just undone it — so carrying them forward would claim a broken workspace
+ * that was repaired a line ago, and would count the same failure twice in
+ * `runVerdict`, which already reads `status`. What survives is the log entry
+ * below, which names the task and the error it died on, and `status`, which is
+ * what the exit code and T-14's summary read.
+ *
+ * A rollback that itself fails is written down and the task is still marked
+ * failed. The alternative is throwing out of a node whose entire purpose is
+ * that one bad task does not end the run.
+ */
+async function abandon(
+  state: AgentState,
+  task: Task,
+  sandbox: Sandbox,
+  errors: BuildError[],
+  log: LogEntry[],
+): Promise<Partial<AgentState>> {
+  const spent = state.attempts[task.id] ?? 0;
+  const first = errors[0];
+  const cause = first === undefined ? "no error was named" : `${first.code}: ${first.message}`;
+
+  let outcome: string;
+  try {
+    const restored = await rollBack(sandbox, state.runId, task.id);
+    outcome = `${restored} files restored`;
+  } catch (error) {
+    outcome = `rollback failed: ${message(error)}`;
   }
-  const taskId = state.orderedTaskIds[position];
-  return state.tasks.find((candidate) => candidate.id === taskId);
+
+  return {
+    errors: [],
+    status: { ...state.status, [task.id]: "failed" },
+    log: [
+      ...log,
+      record(
+        "abandoned",
+        `${task.id} after ${spent} repairs · ${outcome} · last error · ${cause}`,
+      ),
+    ],
+  };
+}
+
+/**
+ * Undoes every write a task performed, newest first, and answers how many.
+ *
+ * A snapshot holding `null` is a file the task created, so putting it back means
+ * deleting it. Both operations go through the sandbox, which is what keeps the
+ * one destructive path in the agent behind the same containment check as the
+ * writes.
+ */
+async function rollBack(sandbox: Sandbox, runId: string, taskId: string): Promise<number> {
+  const taken = snapshotsFor(runId).get(taskId) ?? [];
+  for (const snapshot of [...taken].reverse()) {
+    if (snapshot.contents === null) {
+      await removeFileIn(sandbox, snapshot.path);
+    } else {
+      await writeFileIn(sandbox, snapshot.path, snapshot.contents);
+    }
+  }
+  return taken.length;
 }
 
 /** Whether the queue has nothing left after the task that just finished. */

@@ -32,9 +32,10 @@ flowchart TD
     repair[repair<br/><i>structured errors → rewrite</i>] --> validate
     validate[validate<br/><i>typecheck + tests</i>]
 
-    validate -->|errors · retries left| repair
-    validate -->|errors · retries exhausted<br/>mark failed · roll back · advance| generate
-    validate -->|clean · tasks remain<br/>mark done · advance| generate
+    validate -->|errors in its own file · budget left| repair
+    validate -->|errors · budget spent<br/><i>validate rolled back and marked failed</i>| generate
+    validate -->|errors it does not own<br/><i>advanced, not blamed</i>| generate
+    validate -->|clean<br/><i>validate marked done</i>| generate
     validate -->|clean · queue empty| review
 
     review[review<br/><i>secondary model checks coverage</i>]
@@ -76,11 +77,17 @@ routeAfterOrder(s)
   s.tasks.length === 0 || cycleDetected  → "report"
   otherwise                              → "generate"
 
-routeAfterValidate(s)
-  s.errors.length > 0 && attempts[current] <  MAX_REPAIRS       → "repair"
-  s.errors.length > 0 && attempts[current] >= MAX_REPAIRS       → "generate"   // fail, roll back, advance
-  s.errors.length === 0 && cursor + 1 <  orderedTaskIds.length  → "generate"   // done, advance
-  s.errors.length === 0 && cursor + 1 >= orderedTaskIds.length  → "review"
+routeAfterValidate(s)                       // current = orderedTaskIds[cursor - 1]
+  s.errors.length > 0 && attributable(s) && repairable(s)  → "repair"
+  s.errors.length > 0 && otherwise                         → "generate" | "report"
+  s.errors.length === 0 && cursor <  orderedTaskIds.length → "generate"
+  s.errors.length === 0 && cursor >= orderedTaskIds.length → "review"
+
+attributable(s)
+  some error names current.targetPath        // repair may rewrite that file only
+
+repairable(s)
+  attempts[current] < MAX_REPAIRS_PER_TASK && sum(attempts) < MAX_REPAIRS_PER_RUN
 
 routeAfterReview(s)
   s.reviewReport.gaps.length > 0 && s.reviewRounds < MAX_REVIEW_ROUNDS → "generate"
@@ -90,6 +97,22 @@ routeAfterReview(s)
 `routeAfterValidate` carries the weight: it is simultaneously the repair loop,
 the queue advance and the graceful-degradation path. It fits on one screen and
 is unit-tested without an API key.
+
+**A conditional edge here is a pure function from state to a node name.** It
+cannot write state and it cannot touch the disk, which decides where two pieces
+of work that the diagram's labels might suggest belong to an edge actually live:
+
+- **The cursor advance stays in `generate`,** the node that consumed the task.
+  So during `validate` and `repair` the task in flight is
+  `orderedTaskIds[cursor - 1]`, not `[cursor]`, and `taskInFlight` is the one
+  place that arithmetic is written down.
+- **Rolling back and settling `status` belong to `validate`,** the node that
+  judged the task and the only one that runs on every path out of a validation.
+
+The ceiling itself stays in one place regardless: `repairable` is the single
+predicate, and the edge and `validate` both ask it. If it lived in two, an edge
+that routed on to the next task while the node still thought a repair was coming
+would leave a broken file behind and no failure recorded against it.
 
 ---
 
@@ -193,8 +216,8 @@ still fails, the task is marked failed and the cursor advances.
 
 ### `validate` — two signals, never one
 
-- **Reads:** `outputDir`, `tasks[cursor]`
-- **Writes:** `errors`, `log`
+- **Reads:** `outputDir`, the task in flight, `attempts`
+- **Writes:** `errors`, `status`, `log`, and the workspace when it rolls a task back
 - **Model:** none
 
 Runs the type checker on every visit. Runs the test suite when the task touched
@@ -221,17 +244,57 @@ asserts.
 **The conditional test rule costs attribution, and the repair loop has to know
 it.** Running the suite only when a test file changed means a task that breaks
 an *earlier* task's test is not caught when it happens: the failure surfaces on
-the last task of the queue, where the error belongs to a file the current task
-never touched. T-13's repair loop is built on the assumption that the current
-task caused the current error, and that assumption does not hold on the final
-visit. The alternative — running the suite every visit — pays the slow signal on
-every task to shorten a report that arrives either way.
+a later task, where the error belongs to a file that task never touched. The
+alternative — running the suite every visit — pays the slow signal on every task
+to shorten a report that arrives either way.
+
+**So a failing validation is only the task's own when an error names the file it
+owns.** `repair` may rewrite exactly one file. A validation whose every error
+lands elsewhere therefore describes something the task in flight *cannot* fix:
+it would be handed its own file, asked about a different one, fail twice, and be
+rolled back and marked failed for another task's breakage — while the broken file
+went untouched. Any task of type `test` runs the whole suite and the whole suite
+carries every earlier task's tests, so with any regression at all this is the
+ordinary case, not the tail.
+
+`attributable` is the gate, and it asks only whether **some** error names the
+task's file. One is enough, and the rest travel to `repair` with it: a task
+legitimately breaks files it does not own — change an export and the compiler
+reports the importer, never the file that changed — so filtering the payload down
+to the task's own file would hide the symptom of the change being repaired. The
+prompt separates them and says which single file may be rewritten.
+
+A red validation naming no file the task owns is **advanced past**: no repair, no
+rollback, no `failed`, no repair budget spent, and a `not-attributable` log entry
+naming the files that did fail. `status` stays `pending`, which is the honest
+reading — the task was attempted and nothing it owns was ever judged clean — and
+`errors` is kept, because the workspace really is broken. The run still exits
+non-zero through `runVerdict`, which counts errors no task owns. What must not
+happen, and what an earlier draft of the repair loop did, is reverting correct
+work and recording the failure against the one task that could not have caused it.
+
+**It also settles the task it judged**, because it is the only node on every
+path out of a validation and edges cannot write. Clean, it writes
+`status: "done"`. Failing with `repairable` false, it restores the snapshot
+`generate` took, writes `status: "failed"`, and the run carries on to the next
+task. In between — failing with budget left — it writes no status at all: the
+edge is about to send the task to `repair`, and the task's fate is not decided
+yet. This is the agent's only destructive path, so it is pinned from both sides:
+a test that it reverts when the budget is gone, and a test that it does *not* one
+attempt earlier.
 
 **`errors` is the latest validation, not the run's verdict.** The channel
-overwrites, which is what T-13's repair loop needs: it reads what is wrong
-*now*. It also means a failure recorded against an earlier task is erased by the
-next task validating clean, so the exit code is derived from `status` — where a
+overwrites, which is what the repair loop needs: it reads what is wrong *now*.
+It also means a failure recorded against an earlier task is erased by the next
+task validating clean, so the exit code is derived from `status` — where a
 failed task stays failed — and not from this field.
+
+Abandoning a task **clears** `errors`. They describe a file that no longer
+exists in the shape that produced them, since the rollback has just undone it;
+carrying them on would claim a broken workspace that was repaired a line ago and
+would count one failure twice in `runVerdict`, which already reads `status`. The
+cause survives where a reader looks for it: an `abandoned` log entry naming the
+task, the repairs it spent and the error it died on.
 
 **On failure:** a command that fails to *start* is recorded as a synthetic
 error with `source: "runner"` and flows down the same path, as is a command that
@@ -241,16 +304,37 @@ command reads as a green run.
 
 ### `repair` — the only node that sees a file body
 
-- **Reads:** `errors`, `tasks[cursor]`, the current contents of the failing file
-- **Writes:** files on disk, `attempts`, `usage`, `log`
+- **Reads:** `errors`, the task in flight, the current contents of the failing file
+- **Writes:** files on disk, `surface`, `attempts`, `usage`, `log`
 - **Model:** coder role
 
 Receives the structured errors, not the raw compiler dump, plus the body of the
-file that failed. This is the single place a whole file enters a prompt, and it
-is scoped to one file.
+file that failed. It is only ever reached when one of those errors names that
+file — see `attributable` — so it is never asked to correct code it was not
+shown. The errors that name other files come with it, marked as context.
 
-**On failure:** increments `attempts` regardless of outcome. The ceiling is
-enforced by the edge, not the node, so the retry policy lives in one place.
+**This is the declared exception to §4, and the only one.** Everywhere else in
+the agent a file travels as its signature, which is what keeps a late task's
+prompt the size of an early one's; this node is handed a whole file on purpose.
+Nothing can correct a line it has not been shown, and the alternative — asking
+for a patch against a file described only by its exports — is a guess dressed as
+an edit. It stays an exception by being scoped to exactly one file, the one the
+task in flight owns: not its dependencies, not the files named by errors that
+landed elsewhere. A finding against another file is either fixed from this side
+or left alone, because the file it names belongs to a task with an owner.
+
+It sends that body behind the same cached prefix a fresh task uses, so a repair
+pays for the body and the findings and re-reads the rest. It takes no snapshot:
+the one `generate` took is the state before the task began, which is what a
+rollback wants — not the broken file the repair is replacing.
+
+**No retry of its own.** The repair *is* the retry, and how many a task gets is
+the edge's to decide; a loop here would be a second ceiling nobody reads.
+
+**On failure:** increments `attempts` regardless of outcome, so a repair that
+cannot even be issued still walks the task towards the ceiling instead of
+circling below it. The ceiling is enforced by `repairable`, which the edge and
+`validate` share, so the retry policy lives in one place.
 
 ### `review` — coverage, not style
 
@@ -297,7 +381,7 @@ Every node reads and writes this one typed object. Only two fields accumulate.
 | `tasks` | `Task[]` | `{ id, description, targetPath, taskType, dependsOn[], acceptance[] }` |
 | `orderedTaskIds` | `string[]` | Task ids in topological order, computed by `order`. |
 | `cursor` | `number` | Index into `orderedTaskIds`. The task currently in flight. |
-| `attempts` | `Record<string, number>` | Repair attempts consumed, per task id. |
+| `attempts` | `Record<string, number>` | Repair attempts consumed, per task id. Its sum is the run's repair spend, so the whole-run ceiling needs no field of its own. |
 | `status` | `Record<string, TaskStatus>` | `"pending" \| "done" \| "failed"` |
 | `errors` | `BuildError[]` | `{ file, line?, code, message, source: "tsc" \| "vitest" \| "runner" }` — the current validation result, overwritten each visit. `line` is absent when the output named none. Not the run's verdict: see `validate`. |
 | `reviewReport` | `ReviewReport \| null` | `{ gaps: Gap[]; verdict: string }`. Null until `review` runs. |

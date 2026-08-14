@@ -1,4 +1,4 @@
-import type { SurfaceManifest, Task } from "../graph/state.ts";
+import type { BuildError, SurfaceManifest, Task } from "../graph/state.ts";
 
 /**
  * The coder's standing instructions. Domain-free by construction: every noun
@@ -119,6 +119,74 @@ export function coderRequest(
       "Nothing: everything this task builds on is already in the project above.",
     ),
   ].join("\n");
+}
+
+/**
+ * What `repair` sends: the validators' findings, already parsed, and the body of
+ * the one file they were about.
+ *
+ * **This is the only prompt in the agent carrying a file body**, and it carries
+ * exactly one. Everywhere else a file travels as its signature, because a prompt
+ * that grows with the project is the thing that stops working at task twenty.
+ * The exception is not an oversight: nothing can correct a line it has not been
+ * shown, and the alternative — asking for a patch against a file described only
+ * by its exports — is a guess dressed as an edit.
+ *
+ * It goes out behind the same cached prefix as a fresh task, so a repair pays
+ * for the body and the findings and re-reads the rest.
+ */
+export function repairRequest(
+  task: Task,
+  body: string,
+  errors: readonly BuildError[],
+): string {
+  const own = errors.filter((error) => error.file === task.targetPath);
+  const elsewhere = errors.filter((error) => error.file !== task.targetPath);
+  return [
+    `# Repair: ${task.id}`,
+    "",
+    `The validators rejected \`${task.targetPath}\` as this task wrote it. Their findings are below, already parsed into file, line, code and message.`,
+    "",
+    `# What failed in \`${task.targetPath}\``,
+    "",
+    ...own.map((error) => `- ${describeError(error)}`),
+    // Sent whole rather than filtered down to this file. A file that changes an
+    // export breaks its importers and the compiler reports it there, not here:
+    // dropping those would hide the symptom of the very change being repaired.
+    ...(elsewhere.length === 0
+      ? []
+      : [
+          "",
+          "# What failed elsewhere",
+          "",
+          "These name files this task does not own. They may be consequences of what this one exports — a name that changed, a type that narrowed — or they may belong to a task of their own. Read them; you cannot rewrite them.",
+          "",
+          ...elsewhere.map((error) => `- ${describeError(error)}`),
+        ]),
+    "",
+    `# \`${task.targetPath}\` as it stands now`,
+    "",
+    "```",
+    body.trimEnd(),
+    "```",
+    "",
+    "# The task it still has to satisfy",
+    "",
+    task.description,
+    "",
+    "It is finished when:",
+    ...task.acceptance.map((statement) => `- ${statement}`),
+    "",
+    `Answer with the complete corrected contents of \`${task.targetPath}\` and nothing else. That is the only file you may change: every other path named above belongs to a task of its own, and rewriting one from here would discard work you cannot see. A finding against another file has to be resolved from this side or left alone.`,
+    "",
+    "Correct the cause. Deleting the failing code, widening a type until it fits, or suppressing the diagnostic each clear the finding, and none of them leaves the task finished.",
+  ].join("\n");
+}
+
+/** One parsed finding on one line. The line number is omitted when there was none. */
+function describeError(error: BuildError): string {
+  const at = error.line === undefined ? error.file : `${error.file}:${error.line}`;
+  return `\`${at}\` [${error.code}] ${error.message}`;
 }
 
 /**

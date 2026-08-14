@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { SandboxError, traced, type Trace } from "./trace.ts";
 
@@ -75,6 +75,23 @@ export function writeFileIn(
     const absolute = await resolveInside(sandbox, path);
     await mkdir(dirname(absolute), { recursive: true });
     await writeFile(absolute, contents, "utf8");
+  });
+}
+
+/**
+ * Deletes a file inside the sandbox.
+ *
+ * The only operation here that destroys data, which is why it goes through the
+ * same `resolveInside` as every write rather than taking a path on trust: the
+ * one caller hands it a path it read back out of a snapshot, and a snapshot is
+ * exactly the kind of value that looks too internal to check.
+ *
+ * A path that is not there is not an error. It is what a rollback of a task
+ * whose write never landed finds.
+ */
+export function removeFileIn(sandbox: Sandbox, path: string): Promise<void> {
+  return traced(sandbox.trace, "removeFile", { path }, async () => {
+    await rm(await resolveInside(sandbox, path), { force: true });
   });
 }
 

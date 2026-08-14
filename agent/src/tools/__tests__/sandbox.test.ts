@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { listFilesIn, openSandbox, readFileIn, writeFileIn } from "../fs.ts";
+import { listFilesIn, openSandbox, readFileIn, removeFileIn, writeFileIn } from "../fs.ts";
 import { runCommand } from "../shell.ts";
 import { SandboxError, openTrace, truncate, type TraceEntry } from "../trace.ts";
 
@@ -48,6 +48,25 @@ test("rejects a symlink escaping the sandbox, on write as well as on read", asyn
   // check has to resolve the closest existing ancestor to see the escape.
   await assert.rejects(() => writeFileIn(sandbox, "link/planted.txt", "planted"), SandboxError);
   assert.equal(existsSync(join(outside, "planted.txt")), false);
+});
+
+test("deletes a file inside the sandbox, and tolerates one that is not there", async () => {
+  await writeFileIn(sandbox, "src/doomed.ts", "export const gone = true;\n");
+
+  await removeFileIn(sandbox, "src/doomed.ts");
+  assert.equal(existsSync(join(root, "src/doomed.ts")), false);
+
+  // A rollback of a task whose write never landed finds nothing to delete.
+  await removeFileIn(sandbox, "src/doomed.ts");
+});
+
+test("refuses to delete outside the sandbox, by climbing or through a symlink", async () => {
+  const target = join(outside, "secret.txt");
+
+  await assert.rejects(() => removeFileIn(sandbox, "../outside/secret.txt"), SandboxError);
+  await assert.rejects(() => removeFileIn(sandbox, target), SandboxError);
+  await assert.rejects(() => removeFileIn(sandbox, "link/secret.txt"), SandboxError);
+  assert.equal(existsSync(target), true);
 });
 
 test("rejects a command outside the allowlist", async () => {

@@ -372,10 +372,18 @@ the architecture document says why it is shaped that way.
 - **Files:** `agent/src/nodes/repair.ts`, `agent/src/graph/routers.ts`,
   `agent/src/nodes/__tests__/routers.test.ts`
 - **Scope:** Sends the structured errors plus the failing file's body, scoped to
-  one file. Adds `routeAfterValidate` carrying the repair loop, the queue
-  advance and the degradation path. On exhausting the per-task ceiling:
+  one file. Adds `routeAfterValidate` deciding between the repair loop, the
+  queue advance and the degradation path. On exhausting the per-task ceiling:
   restores the snapshot, marks the task failed, advances. Enforces a
   whole-run repair ceiling. Does **not** abort the run on a failed task.
+- **Correction (found while implementing):** this ticket and
+  `docs/ARCHITECTURE.md` both said the edge would carry the queue advance and
+  the rollback. **A conditional edge in LangGraph is a pure function from state
+  to a node name** — it cannot write state or touch the disk. So the edge
+  decides and nodes act: the cursor advance stays in `generate`, and rolling
+  back and settling `status` go to `validate`, the only node on every path out
+  of a validation. The ceiling stays in one place as a predicate both consult.
+  Both documents were corrected in this ticket's commit.
 - **Acceptance criteria:**
   - [ ] Unit tests cover all four `routeAfterValidate` branches with no API key
   - [ ] A run with an induced failure shows at least one fail → repair → green
