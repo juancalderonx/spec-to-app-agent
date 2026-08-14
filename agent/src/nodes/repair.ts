@@ -3,14 +3,24 @@ import type { BaseMessageLike } from "@langchain/core/messages";
 import { taskInFlight } from "../graph/routers.ts";
 import type { AgentState, LogEntry, UsageEntry } from "../graph/state.ts";
 import type { ModelClient } from "../llm/factory.ts";
-import { CODER_SYSTEM, coderPrefix, repairRequest } from "../prompts/coder.ts";
+import { CODER_SYSTEM, coderCorrection, coderPrefix, repairRequest } from "../prompts/coder.ts";
 import { loadPacks } from "../prompts/packs.ts";
-import { FILE_SCHEMA, readContents } from "../schema/file.ts";
+import { digestAnswer, FILE_SCHEMA, readContents } from "../schema/file.ts";
 import { parseSurface } from "../surface/manifest.ts";
 import { openSandbox, readFileIn, writeFileIn } from "../tools/fs.ts";
 import { openTrace } from "../tools/trace.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
+
+/**
+ * Rounds spent getting an answer in the right *shape* out of one visit. The same
+ * budget `generate` gets, for the same reason: the second call carries something
+ * the first one taught this code, so it is not the first call repeated.
+ *
+ * This is not the repair budget. That one counts corrections that were tried and
+ * did not work, and it belongs to `routeAfterValidate`.
+ */
+const MAX_SCHEMA_ROUNDS = 2;
 
 /**
  * Rewrites the one file the validators rejected, from their parsed findings and
@@ -21,10 +31,17 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
  * declared rather than incidental: a correction needs the line it is correcting.
  * It stays an exception by being scoped to a single file, the one this task owns.
  *
- * **No retry of its own.** The repair *is* the retry, and how many a task gets is
- * `routeAfterValidate`'s to decide; a loop here would be a second ceiling nobody
- * reads. The attempt is charged whatever the outcome, so a repair that keeps
- * failing still walks the task towards the ceiling instead of circling below it.
+ * **One retry, and only over the answer's shape.** The repair *is* the retry of
+ * the correction, and how many a task gets is `routeAfterValidate`'s to decide;
+ * a loop over corrections here would be a second ceiling nobody reads. An answer
+ * this code cannot even read is a different failure, and it used to spend a
+ * whole attempt without a single correction ever being sent — five of nine
+ * repairs in the run this node was written against died that way. So the shape
+ * is retried once inside the visit, with the rejection sent back.
+ *
+ * The attempt is charged whatever the outcome. It has to be: a provider that
+ * never answers in shape would otherwise keep the task below the ceiling
+ * forever, and the ceiling exists to stop exactly that.
  *
  * It does not snapshot. The snapshot `generate` kept is the state before the
  * task began, which is what a rollback wants — not the state before the repair,
@@ -62,30 +79,47 @@ export async function repair(
       ["human", repairRequest(task, body, state.errors)],
     ];
 
-    const answer = await client.invokeStructured("repair", messages, FILE_SCHEMA);
-    usage.push(answer.usage);
+    let corrected: string | undefined;
+    for (let round = 1; round <= MAX_SCHEMA_ROUNDS && corrected === undefined; round += 1) {
+      const answer = await client.invokeStructured("repair", messages, FILE_SCHEMA);
+      usage.push(answer.usage);
 
-    const contents = readContents(answer.value);
-    if (!contents.ok) {
-      return {
-        attempts,
-        usage,
-        log: [...log, record("unusable", `${task.id} attempt ${attempt}: ${contents.error}`)],
-      };
+      const contents = readContents(answer.value);
+      if (contents.ok) {
+        corrected = contents.contents;
+        break;
+      }
+
+      log.push(
+        record(
+          "unusable",
+          `${task.id} attempt ${attempt} round ${round} of ${MAX_SCHEMA_ROUNDS}: ` +
+            `${contents.error} · answer was ${digestAnswer(answer.value)}`,
+        ),
+      );
+      if (round < MAX_SCHEMA_ROUNDS) {
+        messages.push(["human", coderCorrection(contents.error)]);
+      }
     }
 
-    await writeFileIn(sandbox, task.targetPath, contents.contents);
+    if (corrected === undefined) {
+      // Charged, and nothing written: the file on disk is still the one the
+      // validators rejected, which is what the next visit will read.
+      return { attempts, usage, log };
+    }
+
+    await writeFileIn(sandbox, task.targetPath, corrected);
     log.push(
       record(
         "rewrote",
         `${task.id} → ${task.targetPath} · attempt ${attempt} · ` +
-          `${state.errors.length} errors sent · ${Buffer.byteLength(contents.contents)} bytes · ` +
+          `${state.errors.length} errors sent · ${Buffer.byteLength(corrected)} bytes · ` +
           `via ${client.modelId}`,
       ),
     );
 
     return {
-      surface: { ...state.surface, [task.targetPath]: parseSurface(task.targetPath, contents.contents) },
+      surface: { ...state.surface, [task.targetPath]: parseSurface(task.targetPath, corrected) },
       attempts,
       usage,
       log,

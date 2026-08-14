@@ -411,7 +411,8 @@ the architecture document says why it is shaped that way.
   artifact.
 - **Depends on:** T-13
 - **Files:** `agent/src/nodes/repair.ts`, `agent/src/schema/file.ts`,
-  `agent/knowledge/test.md`, `agent/src/nodes/__tests__/repair.test.ts`
+  `agent/knowledge/test.md`, `agent/src/nodes/__tests__/repair.test.ts`,
+  `agent/src/validate/parsers.ts`
 - **Scope:**
   - An unusable answer is logged with a **bounded digest of what actually
     arrived** — enough to tell a truncation from a refusal from a wrong shape.
@@ -431,7 +432,13 @@ the architecture document says why it is shaped that way.
   - Establish whether the assertion text reaching `repair` is truncated by the
     runner or by our own parsing. `expected 'Car InventoryMakeMakeModelModel…'
     to contain 'Camry'` is not enough evidence to repair from, and the repair
-    model receives exactly what the log shows.
+    model receives exactly what the log shows. **Both, as it turns out:** the
+    runner caps the quoted value, and `parseTests` keeps the failure's first
+    line and discards the rest of the block — the difference block that carries
+    the value whole, and the code frame that names the failing assertion and the
+    line it sits on. `parseTests` must carry both under the headline, bounded so
+    a DOM dump cannot spend a prompt, and cut by structure rather than by
+    characters — the same rule T-12 applies to a `tsc` diagnosis.
 - **Acceptance criteria:**
   - [ ] A unit test shows an unusable answer produces a log entry carrying a
         digest of the response, with no API key present
@@ -441,9 +448,13 @@ the architecture document says why it is shaped that way.
         nothing
   - [ ] Mutation: removing the schema retry fails the test above and nothing else
   - [ ] The domain-vocabulary guard still passes over the edited pack
-  - [ ] The truncation question is answered in the commit body — either the
-        parser now carries the full assertion text, or the body records that the
-        truncation is the runner's own and cites where
+  - [ ] A new fixture captures a `toContain` failure over a string long enough to
+        be truncated, and a test shows the code frame and the untruncated
+        received value both reach the message
+  - [ ] Mutation: returning `parseTests` to the failure's first line alone fails
+        the test above
+  - [ ] The truncation question is answered in the commit body: which part is the
+        runner's own, cited, and which part was ours
   - [ ] `npm run typecheck` exits 0
 - **Commit:** `fix(agent): keep a malformed repair answer diagnosable and free`
 

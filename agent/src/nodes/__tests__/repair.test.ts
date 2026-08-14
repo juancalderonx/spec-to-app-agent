@@ -156,19 +156,66 @@ test("carries the failures in other files as context, apart from its own", async
   assert.match(request, /you cannot rewrite them/);
 });
 
-test("charges the attempt even when the answer cannot be used, and writes nothing", async () => {
+test("retries the schema inside the visit, and charges one attempt for both rounds", async () => {
+  const runId = "test-repair-schema-retry";
+  const outputDir = await workspace(runId);
+  await withFile(outputDir, BROKEN);
+  // The shape the run this was written against kept receiving: an answer the
+  // adapter parsed, under every key but the one asked for.
+  const { client, seen } = stub([{ text: "Here is the corrected file." }, { contents: FIXED }]);
+
+  const result = await repair(stateFor(runId, outputDir), client);
+
+  assert.equal(await readFile(join(outputDir, "src/components/ListPanel.tsx"), "utf8"), FIXED);
+  // Two calls, one attempt: the malformed answer cost the run a call and did not
+  // cost the task a correction.
+  assert.equal(seen.length, 2);
+  assert.equal(result.attempts?.["list-panel"], 1);
+  assert.equal(result.usage?.length, 2);
+  // The second call carries the first one's rejection, which is what makes it
+  // something other than the first call sent twice.
+  assert.match(String(JSON.stringify(seen[1]?.at(-1))), /could not be written/);
+});
+
+test("charges one attempt when both rounds are malformed, and writes nothing", async () => {
   const runId = "test-repair-unusable";
   const outputDir = await workspace(runId);
   await withFile(outputDir, BROKEN);
-  const { client } = stub([{ contents: "```tsx\nexport default null;\n```" }]);
+  const { client, seen } = stub([
+    { contents: "```tsx\nexport default null;\n```" },
+    { contents: "```tsx\nexport default null;\n```" },
+  ]);
 
   const result = await repair(stateFor(runId, outputDir, { attempts: { "list-panel": 1 } }), client);
 
   assert.equal(await readFile(join(outputDir, "src/components/ListPanel.tsx"), "utf8"), BROKEN);
-  // Charged, so the ceiling still closes instead of the loop circling below it.
+  assert.equal(seen.length, 2);
+  // Charged, so a provider that never answers in shape cannot circle below the
+  // ceiling the repair budget sets.
   assert.equal(result.attempts?.["list-panel"], 2);
   assert.equal(result.surface, undefined);
-  assert.equal(result.log?.[0]?.event, "unusable");
+  assert.equal(result.log?.length, 2);
+  assert.deepEqual(
+    result.log?.map((entry) => entry.event),
+    ["unusable", "unusable"],
+  );
+});
+
+test("logs a digest of an answer it could not use", async () => {
+  const runId = "test-repair-digest";
+  const outputDir = await workspace(runId);
+  await withFile(outputDir, BROKEN);
+  // No key is defined and none is reached: every answer below is the stub's.
+  const { client } = stub([{ refusal: "I cannot complete this request." }, { contents: FIXED }]);
+
+  const result = await repair(stateFor(runId, outputDir), client);
+  const rejected = result.log?.[0]?.detail ?? "";
+
+  // The rejection sentence alone is the same for a truncation, a refusal and a
+  // wrong shape. These are what tell them apart.
+  assert.match(rejected, /object keys \[refusal\]/);
+  assert.match(rejected, /I cannot complete this request\./);
+  assert.match(rejected, /round 1/);
 });
 
 test("charges the attempt when the failing file cannot even be read", async () => {

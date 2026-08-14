@@ -23,7 +23,20 @@
 - Give the subject its data through `MockedProvider` from
   `@apollo/client/testing`, with one fixture per operation the subject issues.
   The test renders that subject directly, so it inherits none of the providers
-  the entry point mounts and supplies this one itself.
+  the entry point mounts and supplies this one itself. It is used only as an
+  element wrapping the subject:
+
+      render(
+        <MockedProvider mocks={fixtures} addTypename={false}>
+          <Subject />
+        </MockedProvider>,
+      );
+
+- `MockedProvider` is a class component, so **no type may be derived from it**.
+  `ComponentProps<typeof MockedProvider>`, and anything else that treats it as a
+  function, fails the type check with `TS2344: Type 'typeof MockedProvider' does
+  not satisfy the constraint '(...args: any) => any'`. Give the fixture array its
+  own annotation instead, or none at all and let it be inferred from the literal.
 - Never build a real client in a test. A request through `HttpLink` fails in this
   environment before it reaches the mock API, whatever handlers are in place —
   the standing constraints say why.

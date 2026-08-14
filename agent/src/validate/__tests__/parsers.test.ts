@@ -57,18 +57,88 @@ test("parses one error per failed test, from the frame inside the project", () =
   const errors = parseTests(fixture("test-failure"));
 
   assert.equal(errors.length, 2);
-  assert.deepEqual(errors[1], {
-    file: "src/__tests__/InventoryList.test.tsx",
-    line: 21,
-    code: "AssertionError",
-    message: "InventoryList > counts the rows it rendered: expected [] to have a length of 3 but got +0",
-    source: "vitest",
-  });
+  assert.equal(errors[1]?.file, "src/__tests__/InventoryList.test.tsx");
+  assert.equal(errors[1]?.line, 21);
+  assert.equal(errors[1]?.code, "AssertionError");
+  assert.equal(errors[1]?.source, "vitest");
+  assert.match(
+    errors[1]?.message ?? "",
+    /^InventoryList > counts the rows it rendered: expected \[\] to have a length of 3 but got \+0$/m,
+  );
   // The first failure's stack opens inside the assertion library. The frame that
   // matters is the one in the file the run owns, three frames down.
   assert.equal(errors[0]?.line, 17);
   assert.equal(errors[0]?.code, "TestingLibraryElementError");
   assert.match(errors[0]?.message ?? "", /^InventoryList > renders the empty state: Unable to find/);
+});
+
+test("carries the difference block and the code frame under the headline", () => {
+  const counted = parseTests(fixture("test-failure"))[1]?.message ?? "";
+
+  // The runner's own comparison, whole.
+  assert.match(counted, /^- Expected$/m);
+  assert.match(counted, /^\+ Received$/m);
+  assert.match(counted, /^- 3$/m);
+  assert.match(counted, /^\+ 0$/m);
+  // The assertion that produced it, with the caret on the call. This is the part
+  // that names a line of source: the headline never does.
+  assert.match(counted, /^\s+21\|\s+expect\(screen\.queryAllByRole\("row"\)\)\.toHaveLength\(3\);$/m);
+  assert.match(counted, /^\s+\|\s+\^$/m);
+});
+
+test("drops the DOM a missed query prints, and stays inside the budget", () => {
+  const missed = parseTests(fixture("test-failure"))[0]?.message ?? "";
+
+  // The block this came from spends twelve of its lines on two empty `<body>`
+  // elements. A real page would spend hundreds, and none of them say what was
+  // asked of it.
+  assert.doesNotMatch(missed, /Ignored nodes/);
+  assert.doesNotMatch(missed, /<body>/);
+  // What it keeps is the frame: this failure has no difference block at all.
+  assert.match(missed, /^\s+17\|\s+expect\(await screen\.findByText\("No results"\)\)/m);
+  assert.ok(missed.length < 1_200, `the message ran to ${missed.length} characters`);
+});
+
+test("recovers the received value the assertion library truncated", () => {
+  const errors = parseTests(fixture("test-failure-truncated-assertion"));
+
+  assert.equal(errors.length, 1);
+  const message = errors[0]?.message ?? "";
+
+  // Chai quotes at most `config.truncateThreshold` characters — 40, its own
+  // default — so this is everything the headline knows about the value.
+  assert.match(message, /^inventory rendering > .*: expected 'ExplorerFord2021BlueCivicHonda2019Red…' to contain 'Camry'$/m);
+  // And this is the value itself, which the runner printed underneath and this
+  // parser used to discard along with the rest of the block.
+  assert.match(
+    message,
+    /^Received: "ExplorerFord2021BlueCivicHonda2019RedSuburbanChevrolet2023Silver"$/m,
+  );
+  assert.match(message, /^Expected: "Camry"$/m);
+  // The assertion, so a repair knows which line to look at and what it claims.
+  assert.match(message, /^\s+42\|\s+expect\(screen\.getByLabelText/m);
+  assert.equal(errors[0]?.line, 42);
+});
+
+test("cuts an oversized section on a line boundary and says how many it left", () => {
+  const long = "x".repeat(300);
+  const output = [
+    " FAIL  src/__tests__/Panel.test.tsx > Panel > renders",
+    "AssertionError: expected values to match",
+    "- Expected",
+    "+ Received",
+    "",
+    ...Array.from({ length: 8 }, (_, index) => `+ ${index} ${long}`),
+    " ❯ src/__tests__/Panel.test.tsx:9:11",
+  ].join("\n");
+
+  const message = parseTests(output)[0]?.message ?? "";
+  const kept = message.split("\n").filter((line) => line.startsWith("+ "));
+
+  // Whole lines survive; none is halved.
+  assert.ok(kept.every((line) => line === "+ Received" || /^\+ \d x{300}$/.test(line)));
+  assert.ok(kept.length < 9, "the whole block fitted, so nothing about the budget was proved");
+  assert.match(message, /^… \d+ more lines, past the 1000-character budget$/m);
 });
 
 test("strips the colour escapes the runner writes to a pipe", () => {
