@@ -8,7 +8,10 @@ import { failedTasks, runVerdict } from "./graph/verdict.ts";
 import { DEFAULT_PROVIDER, PROVIDERS, requireApiKey } from "./llm/factory.ts";
 import { totalUsage } from "./llm/ledger.ts";
 
-const CACHE_MODES = ["read-write", "read-only", "off"] as const;
+// Two modes because the agent has one cache and it is the provider's prompt
+// cache: a breakpoint is written and read, or it is not placed at all. A
+// `read-only` mode would name a state no provider-side cache can be put in.
+const CACHE_MODES = ["on", "off"] as const;
 
 const USAGE = `Usage: npm start -- --spec <path> --output <dir> [options]
 
@@ -20,8 +23,8 @@ Options:
   --provider <name>  LLM provider: ${PROVIDERS.join(" | ")}.
                      Defaults to $LLM_PROVIDER, then anthropic.
   --model <id>       Model id, overriding the default for every role.
-  --cache <mode>     Response cache: ${CACHE_MODES.join(" | ")}.
-                     Defaults to read-write.
+  --cache <mode>     Prompt cache on the stable prefix: ${CACHE_MODES.join(" | ")}.
+                     Off prices a run that caches nothing. Defaults to on.
   --help             Print this message.`;
 
 /** Narrows a flag's value to one of its allowed members, or explains why not. */
@@ -67,7 +70,7 @@ async function main(): Promise<number> {
     PROVIDERS,
     "provider",
   );
-  const cache = member(values.cache ?? "read-write", CACHE_MODES, "cache");
+  const cache = member(values.cache ?? "on", CACHE_MODES, "cache");
   const model = values.model ?? "provider default";
 
   // Fails here rather than mid-run: a missing credential should cost nothing.
@@ -88,7 +91,11 @@ async function main(): Promise<number> {
   // once. `"values"` hands over the complete state after each superstep, which
   // is both the line to print now and, at the last one, the state the exit code
   // reads — nothing has to be re-accumulated here to get it.
-  const states = await buildGraph({ provider, model: values.model }).stream(
+  const states = await buildGraph({
+    provider,
+    model: values.model,
+    promptCache: cache === "on",
+  }).stream(
     { runId, spec, outputDir },
     // The library's default of 25 supersteps is below what a real plan needs
     // once each task costs a visit of its own.

@@ -526,7 +526,7 @@ the architecture document says why it is shaped that way.
 - **Depends on:** T-14
 - **Files:** `agent/src/cli.ts`, `agent/src/llm/factory.ts`,
   `agent/src/graph/index.ts`, `agent/src/llm/__tests__/factory.test.ts`,
-  `TICKETS.md`
+  `TICKETS.md`, `docs/ARCHITECTURE.md`
 - **Scope:** The flag selects whether `cacheable()` sets a cache breakpoint or
   returns the text as an ordinary block, and the choice reaches every role
   through `RunOptions`. **The modes must name what is implementable:**
@@ -535,6 +535,14 @@ the architecture document says why it is shaped that way.
   be honoured. `--help` says prompt cache, not response cache. Rewrite T-15's
   last acceptance criterion to match what exists. Does **not** build a response
   cache, and does **not** change the default, which stays on.
+- **Note:** `docs/ARCHITECTURE.md` is in this ticket's files because this ticket
+  is what falsifies it. Section 5 carried a decision row for a disk response
+  cache that was never built, and two further rows resting on it, so T-15, T-16
+  and T-17 would have read a binding architecture the code does not have.
+  Corrected here: only the claims this ticket invalidates. A decision that is
+  right for a wrong reason keeps the decision — no sampling parameters are sent
+  because both default models reject them, which is true with or without a
+  cache — and the general pass over the document remains T-18's.
 - **Acceptance criteria:**
   - [ ] A unit test shows `cacheable()` returns a block carrying no cache
         control when the flag disables it, and one that does when it does not
@@ -574,7 +582,8 @@ the architecture document says why it is shaped that way.
         pointed at a file
   - [ ] The committed run log contains at least one fail → repair → green cycle
   - [ ] `git log` shows no manual edit to `generated-app/` after its commit
-  - [ ] Replaying with `--cache read-only` reproduces the run without a key
+  - [ ] All five run artifacts are committed under `agent/runs/<runId>/`, so the
+        run can be read end to end without spending a token
 - **Commit:** `feat(app): add generated application from first full run`
 
 ---
@@ -666,6 +675,24 @@ the architecture document says why it is shaped that way.
   `## How I worked` section covering method and authorship. Does **not** append
   the scaffolding prompts used to build the repository; at most one example
   prompt in `docs/process.md`.
+- **Note:** Three things this ticket inherits, found while closing T-14B and
+  left here rather than fixed there, because no ticket in between depends on
+  any of them.
+  - **The checkpointer row in section 5 names `MemorySaver`, which the code
+    does not install.** `buildGraph` compiles without a checkpointer and
+    nothing under `agent/src` imports one. T-14B corrected that row's cost
+    column, which claimed a response cache made restarts cheap; the decision
+    the row names was left standing and is wrong.
+  - **`README.md` still offers to "replay the committed run at zero cost".**
+    The same dead promise T-14B removed from the architecture document. What a
+    reader gets for free is the committed run's artifacts, not a re-execution:
+    there is no response cache, and the prompt cache needs a key like any
+    other call.
+  - **The diagram in the architecture document is still the hand-drawn one.**
+    `npm run graph:mermaid` emits all eight nodes and every edge, so the
+    replacement this ticket already asks for is a paste — and the prose around
+    the diagram, which counts the nodes and colours them by whether they call a
+    model, has to keep matching what the generated one shows.
 - **Acceptance criteria:**
   - [ ] Every submission requirement has a section: setup, architecture and
         diagram, which models and why, tradeoffs, what would be improved, cost

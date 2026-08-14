@@ -17,7 +17,12 @@ after(() => {
 });
 
 test("the native adapter carries the cache breakpoint on the block it is given", () => {
-  const client = createModel({ provider: "anthropic", role: "coder", model: "claude-opus-5" });
+  const client = createModel({
+    provider: "anthropic",
+    role: "coder",
+    model: "claude-opus-5",
+    promptCache: true,
+  });
 
   const message = client.cacheable("the stable prefix");
 
@@ -30,7 +35,25 @@ test("the native adapter carries the cache breakpoint on the block it is given",
 });
 
 test("the OpenAI-compatible adapter is sent no breakpoint to misread", () => {
-  const client = createModel({ provider: "openai", role: "coder", model: "gpt-5.6-sol" });
+  const client = createModel({
+    provider: "openai",
+    role: "coder",
+    model: "gpt-5.6-sol",
+    promptCache: true,
+  });
 
+  assert.deepEqual(client.cacheable("the stable prefix"), ["human", "the stable prefix"]);
+});
+
+test("the cache flag switched off leaves the same prefix unmarked", () => {
+  const client = createModel({
+    provider: "anthropic",
+    role: "coder",
+    model: "claude-opus-5",
+    promptCache: false,
+  });
+
+  // The same provider as the first test, so what changes is the flag and
+  // nothing else: no breakpoint is written, and the text still goes out.
   assert.deepEqual(client.cacheable("the stable prefix"), ["human", "the stable prefix"]);
 });

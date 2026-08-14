@@ -147,6 +147,8 @@ export interface ModelOptions {
   role: ModelRole;
   /** From `--model`; falls back to the role's variable, then the default. */
   model: string | undefined;
+  /** From `--cache`. False places no breakpoint, so nothing is written or read. */
+  promptCache: boolean;
 }
 
 /**
@@ -154,7 +156,7 @@ export interface ModelOptions {
  * whose base URL selects among the remaining providers.
  */
 export function createModel(options: ModelOptions): ModelClient {
-  const { provider, role } = options;
+  const { provider, role, promptCache } = options;
   const apiKey = requireApiKey(provider);
   const modelId = resolveModelId(provider, role, options.model);
   const { baseUrl } = CONFIG[provider];
@@ -194,7 +196,10 @@ export function createModel(options: ModelOptions): ModelClient {
       // Every other provider reaches the OpenAI-compatible adapter, which
       // caches long prefixes on its own and has no breakpoint to place. Sending
       // this block shape there would only risk an argument it does not know.
-      return provider === "anthropic"
+      //
+      // With the cache off the same text goes out as an ordinary block, which
+      // is how a run with no cached prefix can be priced against one with it.
+      return provider === "anthropic" && promptCache
         ? new HumanMessage({
             content: [{ type: "text", text, cache_control: { type: "ephemeral" } }],
           })

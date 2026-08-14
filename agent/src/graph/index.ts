@@ -25,9 +25,19 @@ export interface RunOptions {
   provider: Provider;
   /** From `--model`. Undefined leaves every role on its own default. */
   model: string | undefined;
+  /**
+   * From `--cache`. Carried here rather than read where the breakpoint is
+   * placed, so that one flag reaches every role through the same path the
+   * provider and the model take.
+   */
+  promptCache: boolean;
 }
 
-const DEFAULT_RUN_OPTIONS: RunOptions = { provider: DEFAULT_PROVIDER, model: undefined };
+const DEFAULT_RUN_OPTIONS: RunOptions = {
+  provider: DEFAULT_PROVIDER,
+  model: undefined,
+  promptCache: true,
+};
 
 /**
  * Supersteps one task is allowed to cost, in the worst case: one `generate`,
@@ -77,14 +87,13 @@ export function buildGraph(options: RunOptions = DEFAULT_RUN_OPTIONS) {
     .addNode("prepare", prepare)
     .addNode("plan", (state) => {
       // Built per visit rather than once at compile time: rendering the diagram
-      // must not need a credential.
-      const { provider, model } = options;
-      return plan(state, createModel({ provider, role: "planner", model }));
+      // must not need a credential. Spread rather than field by field, so a
+      // future run option reaches every role without four edits.
+      return plan(state, createModel({ ...options, role: "planner" }));
     })
     .addNode("order", order)
     .addNode("generate", (state) => {
-      const { provider, model } = options;
-      return generate(state, createModel({ provider, role: "coder", model }));
+      return generate(state, createModel({ ...options, role: "coder" }));
     })
     // Called with the state alone: the node's second parameter is the command
     // runner its tests replace, and the graph would otherwise hand it a config.
@@ -92,16 +101,14 @@ export function buildGraph(options: RunOptions = DEFAULT_RUN_OPTIONS) {
     .addNode("repair", (state) => {
       // The coder role, deliberately: the file being corrected is one this same
       // role wrote, against the same standing constraints and the same prefix.
-      const { provider, model } = options;
-      return repair(state, createModel({ provider, role: "coder", model }));
+      return repair(state, createModel({ ...options, role: "coder" }));
     })
     .addNode("review", (state) => {
       // The reviewer role, which defaults to a different model from the coder's:
       // whoever wrote a file re-applies, when asked to check it, the assumptions
       // that left the gap. `--model` overrides every role, which is what makes a
       // single-model comparison run possible.
-      const { provider, model } = options;
-      return review(state, createModel({ provider, role: "reviewer", model }));
+      return review(state, createModel({ ...options, role: "reviewer" }));
     })
     .addNode("report", report)
     .addEdge(START, "prepare")
