@@ -116,7 +116,7 @@ export async function generate(
       ["human", coderRequest(task, dependencySignatures(state, task), packs.conventions)],
     ];
 
-    const contents = await ask(client, messages, usage, log);
+    const contents = await ask(client, messages, usage, log, task.id);
 
     await keepSnapshot(sandbox, state, task, absolute);
     // The absolute path is what the trace records, so a reader sees where the
@@ -161,6 +161,7 @@ async function ask(
   messages: BaseMessageLike[],
   usage: UsageEntry[],
   log: LogEntry[],
+  taskId: string,
 ): Promise<string> {
   let rejection = "";
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -181,7 +182,9 @@ async function ask(
       continue;
     }
 
-    usage.push(answer.usage);
+    // Stamped here rather than in the ledger: only the node knows whose call
+    // this was, and the summary reports input tokens per task.
+    usage.push({ ...answer.usage, task: taskId });
     const contents = readContents(answer.value);
     if (contents.ok) {
       return contents.contents;

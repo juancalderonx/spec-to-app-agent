@@ -3,12 +3,14 @@ import { test } from "node:test";
 import {
   MAX_REPAIRS_PER_RUN,
   MAX_REPAIRS_PER_TASK,
+  MAX_REVIEW_ROUNDS,
   attributable,
   repairable,
+  routeAfterReview,
   routeAfterValidate,
   taskInFlight,
 } from "../../graph/routers.ts";
-import type { AgentState, BuildError, Task } from "../../graph/state.ts";
+import type { AgentState, BuildError, Gap, Task } from "../../graph/state.ts";
 
 function task(id: string): Task {
   return {
@@ -74,11 +76,11 @@ test("advances to the next task when the validation was clean", () => {
   assert.equal(routeAfterValidate(stateFor()), "generate");
 });
 
-test("ends the run when the validation was clean and the queue is empty", () => {
-  assert.equal(routeAfterValidate(stateFor({ cursor: 2 })), "report");
+test("reviews the run when the validation was clean and the queue is empty", () => {
+  assert.equal(routeAfterValidate(stateFor({ cursor: 2 })), "review");
 });
 
-test("ends the run when the last task of the queue is the one given up on", () => {
+test("reviews the run even when its last task was given up on", () => {
   const state = stateFor({
     cursor: 2,
     errors: [{ ...FAILURE, file: "src/components/second.tsx" }],
@@ -86,7 +88,9 @@ test("ends the run when the last task of the queue is the one given up on", () =
   });
 
   assert.equal(attributable(state), true);
-  assert.equal(routeAfterValidate(state), "report");
+  // A red run is where a coverage answer is worth the most: its gaps are the
+  // ones a reader cannot infer from the exit code.
+  assert.equal(routeAfterValidate(state), "review");
 });
 
 test("stops repairing anything once the whole run has spent its ceiling", () => {
@@ -139,6 +143,47 @@ test("repairs a failure the task caused in a file it does not own", () => {
 
   assert.equal(attributable(state), true);
   assert.equal(routeAfterValidate(state), "repair");
+});
+
+const GAP: Gap = {
+  requirement: "Every item in the collection is reachable from the list.",
+  detail: "Nothing exports a list of them.",
+  targetPath: "src/components/List.tsx",
+  taskType: "component",
+};
+
+test("sends a review's gaps back through the queue while a round is left", () => {
+  const state = stateFor({
+    cursor: 2,
+    reviewReport: { gaps: [GAP], verdict: "One requirement is unmet." },
+    reviewRounds: 1,
+  });
+
+  assert.equal(routeAfterReview(state), "generate");
+});
+
+test("reports once the review rounds are spent, gaps or no gaps", () => {
+  const spent = stateFor({
+    cursor: 2,
+    reviewReport: { gaps: [GAP], verdict: "One requirement is unmet." },
+    reviewRounds: MAX_REVIEW_ROUNDS,
+  });
+
+  assert.equal(routeAfterReview(spent), "report");
+});
+
+test("reports when the review found nothing, and when it failed outright", () => {
+  const clean = stateFor({
+    cursor: 2,
+    reviewReport: { gaps: [], verdict: "Every requirement is covered." },
+    reviewRounds: 1,
+  });
+  // A review that could not be read leaves a null report, and a null report is
+  // not a reason to build anything.
+  const broken = stateFor({ cursor: 2, reviewReport: null, reviewRounds: 1 });
+
+  assert.equal(routeAfterReview(clean), "report");
+  assert.equal(routeAfterReview(broken), "report");
 });
 
 test("refuses to repair a visit with no task in flight", () => {

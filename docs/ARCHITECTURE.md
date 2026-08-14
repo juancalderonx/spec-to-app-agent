@@ -79,7 +79,7 @@ routeAfterOrder(s)
 
 routeAfterValidate(s)                       // current = orderedTaskIds[cursor - 1]
   s.errors.length > 0 && attributable(s) && repairable(s)  → "repair"
-  s.errors.length > 0 && otherwise                         → "generate" | "report"
+  s.errors.length > 0 && otherwise                         → "generate" | "review"
   s.errors.length === 0 && cursor <  orderedTaskIds.length → "generate"
   s.errors.length === 0 && cursor >= orderedTaskIds.length → "review"
 
@@ -359,9 +359,16 @@ errors must not sink an otherwise green run.
 - **Writes:** `agent/runs/<runId>/` on disk
 - **Model:** none
 
-Emits `plan.json`, `tools.jsonl`, `errors.jsonl`, `usage.json` and
-`summary.md`. Sets the process exit code: 0 when every task is done, 1 when any
-task ended failed.
+Writes `errors.jsonl`, `usage.json` and `summary.md`, completing the five
+artifacts of a run: `plan.json` is written by `plan` as soon as a plan
+validates, and `tools.jsonl` by the trace, so a run that dies early still leaves
+both on disk.
+
+`summary.md` carries the run's verdict — 0 when every task is done, 1 when any
+task ended failed — and the node stops there. Setting `process.exitCode` from
+inside a node would decide the exit status of every process that runs the graph,
+the test suite included; `runVerdict` is the rule's one home and the CLI is the
+one caller that turns it into a status.
 
 **On failure:** I/O only; falls back to printing the summary on stdout.
 

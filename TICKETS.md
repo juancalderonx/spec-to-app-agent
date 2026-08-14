@@ -473,8 +473,30 @@ the architecture document says why it is shaped that way.
   manifest and emits structured gaps, using a different model from the coder by
   default. `routeAfterReview` reinjects remediation tasks once, then reports.
   The report node writes plan, tool trace, error log, usage ledger and summary,
-  and sets the exit code. Does **not** let a failed review sink an otherwise
-  green run, and the reviewer does **not** read file bodies.
+  and writes the run's verdict into the summary. Does **not** let a failed
+  review sink an otherwise green run, does **not** set the process exit code —
+  see the note — and the reviewer does **not** read file bodies.
+- **Note:** Three things this ticket got wrong or left open, decided while
+  implementing it.
+  - **The exit code stays in the CLI.** This ticket asked `report` to set it. A
+    node that writes `process.exitCode` decides the exit status of whatever
+    process runs the graph, and the test suite runs the graph: a green suite
+    could exit non-zero with nothing failing. `runVerdict` is already the single
+    home of the rule; `report` writes that verdict into `summary.md` and the CLI
+    is the one caller that turns it into a process's status.
+  - **A gap carries a target and a type, and a remediation task depends on every
+    task that finished.** A gap that only names what is missing cannot become a
+    task, so `Gap` gains `targetPath` and `taskType`. And `generate` injects the
+    signatures of a task's direct dependencies only, so a remediation task with
+    no edges would see the boilerplate's surface and nothing this run built —
+    the defect commit `596b5d6` fixed, reached through a new door. The reviewer
+    cannot supply those edges: the gap it is closing is by definition the part
+    nobody planned. The cost is a wider prompt for at most five tasks at the very
+    end of a run, signatures only.
+  - **`summary.md` has three task statuses, not two.** Since T-13 a task whose
+    validation was red about files it does not own stays `pending` — attempted,
+    never judged clean, never rolled back. It is reported as `unresolved`;
+    folding it into done or failed hides the one task a reader most needs.
 - **Acceptance criteria:**
   - [ ] A completed run writes all five artifacts under `agent/runs/<runId>/`
   - [ ] `summary.md` states total tokens, total cost in USD, per-task input

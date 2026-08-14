@@ -82,7 +82,9 @@ export async function repair(
     let corrected: string | undefined;
     for (let round = 1; round <= MAX_SCHEMA_ROUNDS && corrected === undefined; round += 1) {
       const answer = await client.invokeStructured("repair", messages, FILE_SCHEMA);
-      usage.push(answer.usage);
+      // Charged to the task, like the `generate` call it is correcting, so the
+      // summary's per-task figure covers what the task really cost.
+      usage.push({ ...answer.usage, task: task.id });
 
       const contents = readContents(answer.value);
       if (contents.ok) {

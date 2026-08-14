@@ -5,10 +5,13 @@ import { order } from "../nodes/order.ts";
 import { plan } from "../nodes/plan.ts";
 import { prepare } from "../nodes/prepare.ts";
 import { repair } from "../nodes/repair.ts";
+import { report } from "../nodes/report.ts";
+import { MAX_REMEDIATION_TASKS, review } from "../nodes/review.ts";
 import { validate } from "../nodes/validate.ts";
 import {
   MAX_REPAIRS_PER_TASK,
   routeAfterOrder,
+  routeAfterReview,
   routeAfterValidate,
 } from "./routers.ts";
 import { AgentStateAnnotation, type AgentState } from "./state.ts";
@@ -43,8 +46,8 @@ const DEFAULT_RUN_OPTIONS: RunOptions = { provider: DEFAULT_PROVIDER, model: und
  */
 const STEPS_PER_TASK = 2 + 2 * MAX_REPAIRS_PER_TASK;
 
-/** `prepare`, `plan`, `order`, `review`, `report`, and one spare. */
-const FIXED_STEPS = 6;
+/** `prepare`, `plan`, `order`, two `review` visits, `report`, and one spare. */
+const FIXED_STEPS = 7;
 
 /** The longest plan the budget below covers. Named in the message when a run exceeds it. */
 export const MAX_PLAN_TASKS = 40;
@@ -56,24 +59,13 @@ export const MAX_PLAN_TASKS = 40;
  * — `cursor` only ever increases, every repair charges an attempt against two
  * ceilings, and `routeAfterValidate` stops at the end of the queue — so this is
  * the guard on a plan larger than this agent is built for, not on a cycle.
+ *
+ * The review's remediation tasks are counted in as well. They are queued after
+ * the plan is already sorted, so a budget covering the plan alone would end a
+ * long run at the last node it has — the one that writes the artifacts.
  */
-export const RECURSION_LIMIT = FIXED_STEPS + MAX_PLAN_TASKS * STEPS_PER_TASK;
-
-// Placeholder. T-14 replaces `report` with the artifact writer. It carries the
-// name the architecture's graph uses, so the rendered diagram never has to be
-// relabelled.
-
-function report(state: AgentState) {
-  return {
-    log: [
-      {
-        node: "report",
-        event: "placeholder",
-        detail: `would write artifacts for run ${state.runId}`,
-      },
-    ],
-  };
-}
+export const RECURSION_LIMIT =
+  FIXED_STEPS + (MAX_PLAN_TASKS + MAX_REMEDIATION_TASKS) * STEPS_PER_TASK;
 
 /** A workspace that did not set up is not worth spending a planner call on. */
 function routeAfterPrepare(state: AgentState): "plan" | "report" {
@@ -103,14 +95,23 @@ export function buildGraph(options: RunOptions = DEFAULT_RUN_OPTIONS) {
       const { provider, model } = options;
       return repair(state, createModel({ provider, role: "coder", model }));
     })
+    .addNode("review", (state) => {
+      // The reviewer role, which defaults to a different model from the coder's:
+      // whoever wrote a file re-applies, when asked to check it, the assumptions
+      // that left the gap. `--model` overrides every role, which is what makes a
+      // single-model comparison run possible.
+      const { provider, model } = options;
+      return review(state, createModel({ provider, role: "reviewer", model }));
+    })
     .addNode("report", report)
     .addEdge(START, "prepare")
     .addConditionalEdges("prepare", routeAfterPrepare, ["plan", "report"])
     .addEdge("plan", "order")
     .addConditionalEdges("order", routeAfterOrder, ["generate", "report"])
     .addEdge("generate", "validate")
-    .addConditionalEdges("validate", routeAfterValidate, ["repair", "generate", "report"])
+    .addConditionalEdges("validate", routeAfterValidate, ["repair", "generate", "review"])
     .addEdge("repair", "validate")
+    .addConditionalEdges("review", routeAfterReview, ["generate", "report"])
     .addEdge("report", END)
     .compile();
 }

@@ -56,9 +56,21 @@ export interface BuildError {
   source: "tsc" | "vitest" | "runner";
 }
 
+/**
+ * One requirement the review believes the built surface does not represent.
+ *
+ * It carries a target and a type as well as the finding, because a gap that
+ * only says what is missing cannot become work: `review` turns each one into a
+ * remediation task, and a task without a file to write and a type to load its
+ * packs from is not a task.
+ */
 export interface Gap {
   requirement: string;
   detail: string;
+  /** The one file that closes it, relative to the project root. */
+  targetPath: string;
+  /** From the fixed set, for the same reason a plan's tasks carry one. */
+  taskType: TaskType;
 }
 
 export interface ReviewReport {
@@ -70,6 +82,18 @@ export type ModelRole = "planner" | "coder" | "reviewer";
 
 export interface UsageEntry {
   node: string;
+  /**
+   * The task this call was spent on, where one owns it. Absent for `plan` and
+   * `review`, which are spent on the run rather than on a task.
+   *
+   * Stamped by the node rather than derived downstream, because the order of the
+   * ledger cannot be read back into tasks: a schema retry inside one visit
+   * appends a second entry under the same node, and from the outside that is
+   * indistinguishable from the next task's first call. It is what lets the
+   * summary publish input tokens per task in execution order, which is the
+   * measurement §4 of the architecture rests its context claim on.
+   */
+  task?: string;
   role: ModelRole;
   model: string;
   inputTokens: number;

@@ -116,9 +116,11 @@ async function main(): Promise<number> {
     console.log(line);
   }
 
-  // The rule itself lives in `runVerdict`, where it is unit-tested and where
-  // `report` reads it from once T-14 owns the exit code. Deciding it inline here
-  // is how it gets decided differently in two places.
+  // The rule itself lives in `runVerdict`, where it is unit-tested, and this is
+  // the one place a process reads it: `report` writes the same verdict into
+  // `summary.md` and sets nothing, because a node that writes `process.exitCode`
+  // changes the exit status of every process that runs the graph — the test
+  // suite included.
   const failed = failedTasks(final);
   if (failed.length > 0) {
     console.error(`tasks failed: ${failed.join(", ")}`);
@@ -135,8 +137,9 @@ async function main(): Promise<number> {
  * prefix on every task. So a run that cached nothing says so rather than
  * printing three zeros and leaving the reader to notice.
  *
- * Until `report` writes `summary.md` (T-14), this is where the run's cost is
- * read from.
+ * One line, at the end of a run that has been streaming for minutes. The
+ * breakdown — per kind of token, per role, per node and per task — is in
+ * `summary.md`, which `report` has just written.
  */
 function summarizeUsage(final: AgentState): string[] {
   const total = totalUsage(final.usage);

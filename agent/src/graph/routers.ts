@@ -127,11 +127,52 @@ export function repairable(state: AgentState): boolean {
  * `validate`, the node that judged them, and advancing the cursor stays in
  * `generate`, the node that consumed it. What lives here is the decision alone.
  *
- * T-14 replaces branch 4's `report` with `review`.
+ * An empty queue goes to `review` whether or not the run is green. A red run is
+ * where a coverage answer is worth the most — it is the one whose gaps a reader
+ * cannot infer from the exit code — and the reviewer reads the specification
+ * against the surface, which a failed task does not invalidate.
  */
-export function routeAfterValidate(state: AgentState): "repair" | "generate" | "report" {
+export function routeAfterValidate(state: AgentState): "repair" | "generate" | "review" {
   if (state.errors.length > 0 && attributable(state) && repairable(state)) {
     return "repair";
   }
-  return state.cursor < state.orderedTaskIds.length ? "generate" : "report";
+  return state.cursor < state.orderedTaskIds.length ? "generate" : "review";
+}
+
+/**
+ * Review visits a run is allowed. Two: the first one may queue remediation
+ * tasks, and the second judges what they produced and ends the run either way.
+ *
+ * A third would be the second one again — the reviewer that just saw its own
+ * remediation land has no new question to ask — at the price of another round
+ * of generation.
+ */
+export const MAX_REVIEW_ROUNDS = 2;
+
+/**
+ * Whether a review's findings get a remediation round.
+ *
+ * Both sides of the decision ask this one function, the way `repairable` serves
+ * the repair loop: `review` asks it with the count it is about to write, to
+ * decide whether to queue tasks, and `routeAfterReview` asks it afterwards, to
+ * decide where to go. Written twice, they would eventually disagree — and the
+ * disagreement that costs is the one where tasks are queued and the run reports
+ * without building them.
+ */
+export function remediable(gaps: number, roundsSpent: number): boolean {
+  return gaps > 0 && roundsSpent < MAX_REVIEW_ROUNDS;
+}
+
+/**
+ * Gaps the run still has a round for go back through the queue; anything else
+ * ends the run.
+ *
+ * `reviewRounds` is the count of review visits already spent, written by
+ * `review` on its way out — so by the time this reads it, the visit that
+ * produced these gaps is included.
+ */
+export function routeAfterReview(state: AgentState): "generate" | "report" {
+  return remediable(state.reviewReport?.gaps.length ?? 0, state.reviewRounds)
+    ? "generate"
+    : "report";
 }

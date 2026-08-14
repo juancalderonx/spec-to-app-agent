@@ -27,8 +27,10 @@ export function failedTasks(state: AgentState): string[] {
  * install, a plan that could not be ordered. Those end the run before `status`
  * has anything in it.
  *
- * T-14 moves the exit code into `report`. This is the function it calls; the
- * rule does not get restated there.
+ * Two callers, one rule: the CLI, which turns it into the process's exit code,
+ * and `report`, which writes it into `summary.md`. The node does not set the
+ * code itself — the graph is run by the test suite too, and a node that writes
+ * `process.exitCode` would decide the exit status of whatever ran it.
  */
 export function runVerdict(state: AgentState): number {
   return failedTasks(state).length === 0 && state.errors.length === 0 ? 0 : 1;
