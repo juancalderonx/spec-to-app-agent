@@ -33,36 +33,46 @@ component truly needs the boolean in JavaScript, the test file that mounts it
 has to define `window.matchMedia` itself before rendering — treat that as a
 signal the component wants rewriting rather than as a pattern to spread.
 
-## Mocked state survives from one test to the next
+## A test mounts its own providers, and mocks above the network
 
-`src/mocks/handlers.ts` keeps its seeded collection in a module-level variable
-and every mutation handler pushes into it. `server.resetHandlers()` in the setup
-file restores the *handler list*, not that variable: the second test in a file
-sees whatever the first test wrote.
+`src/main.tsx` is the only place `ApolloProvider`, `ThemeProvider` and
+`CssBaseline` are mounted. A test renders its subject directly and never goes
+through that file, so nothing it renders inherits any of them. A subject that
+queries with no client in context renders its failure branch, and what breaks is
+an assertion about text that is missing — which reads like a defect in the
+component rather than a provider the test never supplied.
 
-So never assert on a total count, an array length, or "the last entry" after a
-test that has written through a mutation. Isolate the test instead:
+The client the test supplies has to be a mocked one. A real `HttpLink` cannot
+complete a request here at all: jsdom provides the `AbortSignal` and the runtime
+provides `fetch`, the two disagree about the type, and the request fails with
+`RequestInit: Expected signal ("AbortSignal {}") to be an instance of
+AbortSignal` before it ever leaves the client. Nothing on the mock API's side
+changes that, because nothing on that side is reached. The client the project
+itself ships fails the same way.
 
-1. Override the handler for that one test with `server.use(...)` from
-   `@/mocks/server`, returning the fixture that test needs. The subject still
-   goes through Apollo Client and MSW, which is how the application actually
-   runs, and the override is dropped by the reset afterwards.
-2. Only if a test cannot be expressed that way, fall back to Apollo's
-   `MockedProvider`. It replaces the network entirely, so it matches a mock only
-   when the operation *and* every variable match exactly, and each fixture
-   entity needs its `__typename` or the cache normalises the result into
-   nothing. A silent empty render is usually one of those two.
+So mock above the network, with `MockedProvider` from `@apollo/client/testing`:
 
-## An operation without a handler takes down the whole suite
+- A fixture matches only when the operation *and* every variable match exactly.
+- Every entity in a fixture needs its `__typename`, or the cache normalises the
+  result into nothing and the subject renders empty with no error to read.
+- An operation with no fixture comes back as a failure, so a subject issuing two
+  operations needs two — including the ones issued below it by its children.
+- Add `ThemeProvider` around it only where the subject reads the theme.
 
-The MSW server starts with `onUnhandledRequest: "error"`. One operation lacking
-a handler does not fail a single assertion; it fails every test that renders
-anything at all.
+## The mock API answers the application, not the test run
 
-An operation added to `src/graphql/queries.ts` therefore needs a handler added
-beside the existing ones in `src/mocks/handlers.ts`, keyed by the operation
-name. The browser worker and the test server share one handler list, so a single
-addition covers both.
+`src/mocks/handlers.ts` is what the running application talks to, through the
+worker `src/main.tsx` starts in development. `src/test-setup.ts` starts those
+same handlers for the test run, but a test mocking above the network never
+reaches them.
+
+Two things follow. An operation added to `src/graphql/queries.ts` still needs a
+handler beside the existing ones, keyed by the operation name, or the running
+application asks for something nothing answers. And those handlers keep their
+seeded collection in a module-level variable that every mutation pushes into,
+which `server.resetHandlers()` does not restore — it restores the handler list.
+That variable is state the application accumulates as it runs, never a fixture
+to assert against.
 
 ## What finished means
 
