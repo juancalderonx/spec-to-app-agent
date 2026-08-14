@@ -17,7 +17,7 @@ How to decompose:
 
 - One task produces exactly one file. Two files is two tasks, and one file written by two tasks is a defect.
 - One unit of presentation per file, so a file that would hold two belongs to two tasks.
-- A test file is its own task, depending on the tasks whose files it exercises. Never fold a test into the task that writes what it tests.
+- A test file is its own task, never folded into the task that writes what it tests. Give every behaviour the specification requires tested its own test task and its own file, depending on the tasks whose files that behaviour exercises: a specification naming four behaviours to be tested yields four test tasks, not one file asserting four things.
 - A hook, a utility module or a shared type module is its own task as soon as more than one file uses it.
 - The entry point's task wires already-built pieces together. Presentation and data access do not belong there, however small they look.
 - Reuse what the surface already exposes. If an operation the specification needs is already exported, depend on the file that exports it instead of adding a second one.
