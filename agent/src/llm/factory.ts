@@ -1,0 +1,164 @@
+import { ChatAnthropic } from "@langchain/anthropic";
+import type { BaseMessageLike } from "@langchain/core/messages";
+import { ChatOpenAI } from "@langchain/openai";
+import type { ModelRole, UsageEntry } from "../graph/state.ts";
+import { toUsageEntry } from "./ledger.ts";
+
+export const PROVIDERS = ["anthropic", "openai", "gemini", "openrouter"] as const;
+
+export type Provider = (typeof PROVIDERS)[number];
+
+interface ProviderConfig {
+  /** The one variable this provider needs. No provider reads another's. */
+  apiKeyVar: string;
+  /** `null` selects the native adapter; a URL selects the OpenAI-compatible one. */
+  baseUrl: string | null;
+  /** `null` where no default has been exercised, so a model must be supplied. */
+  defaultModels: Record<ModelRole, string> | null;
+}
+
+const CONFIG: Record<Provider, ProviderConfig> = {
+  anthropic: {
+    apiKeyVar: "ANTHROPIC_API_KEY",
+    baseUrl: null,
+    defaultModels: {
+      planner: "claude-opus-5",
+      coder: "claude-opus-5",
+      reviewer: "claude-sonnet-5",
+    },
+  },
+  openai: {
+    apiKeyVar: "OPENAI_API_KEY",
+    baseUrl: null,
+    defaultModels: {
+      planner: "gpt-5.6-sol",
+      coder: "gpt-5.6-sol",
+      reviewer: "gpt-5.6-terra",
+    },
+  },
+  gemini: {
+    apiKeyVar: "GEMINI_API_KEY",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    defaultModels: null,
+  },
+  openrouter: {
+    apiKeyVar: "OPENROUTER_API_KEY",
+    baseUrl: "https://openrouter.ai/api/v1",
+    defaultModels: null,
+  },
+};
+
+/** Ceiling on one response. Not a sampling parameter: none are ever sent. */
+const MAX_OUTPUT_TOKENS = 16_000;
+
+/** `planner` reads `PLANNER_MODEL`, and so on. */
+function modelEnvVar(role: ModelRole): string {
+  return `${role.toUpperCase()}_MODEL`;
+}
+
+/**
+ * Resolves the credential for the selected provider only, and fails here —
+ * before any network call — naming the exact variable to define.
+ */
+export function requireApiKey(provider: Provider): string {
+  const { apiKeyVar } = CONFIG[provider];
+  const key = process.env[apiKeyVar];
+  if (key === undefined || key === "") {
+    throw new Error(
+      `Provider "${provider}" needs ${apiKeyVar}, which is not set. ` +
+        `Define it in .env (see .env.example), or select another provider with --provider.`,
+    );
+  }
+  return key;
+}
+
+function resolveModelId(
+  provider: Provider,
+  role: ModelRole,
+  override: string | undefined,
+): string {
+  const fromEnv = process.env[modelEnvVar(role)];
+  const chosen = override ?? (fromEnv === "" ? undefined : fromEnv);
+  if (chosen !== undefined) {
+    return chosen;
+  }
+
+  const { defaultModels } = CONFIG[provider];
+  if (defaultModels === null) {
+    throw new Error(
+      `Provider "${provider}" ships no default model for the ${role} role. ` +
+        `Name one with --model, or set ${modelEnvVar(role)}.`,
+    );
+  }
+  return defaultModels[role];
+}
+
+/** A rejection of the model itself, as opposed to a transport or quota failure. */
+function isModelAccessError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("status" in error)) {
+    return false;
+  }
+  return error.status === 403 || error.status === 404;
+}
+
+export interface ModelResponse {
+  text: string;
+  usage: UsageEntry;
+}
+
+export interface ModelClient {
+  readonly modelId: string;
+  /** `node` names the graph node spending, so the ledger attributes the cost. */
+  invoke(node: string, messages: BaseMessageLike[]): Promise<ModelResponse>;
+}
+
+export interface ModelOptions {
+  provider: Provider;
+  role: ModelRole;
+  /** From `--model`; falls back to the role's variable, then the default. */
+  model: string | undefined;
+}
+
+/**
+ * One interface over two adapters: the native one, and an OpenAI-compatible one
+ * whose base URL selects among the remaining providers.
+ */
+export function createModel(options: ModelOptions): ModelClient {
+  const { provider, role } = options;
+  const apiKey = requireApiKey(provider);
+  const modelId = resolveModelId(provider, role, options.model);
+  const { baseUrl } = CONFIG[provider];
+
+  const chat =
+    provider === "anthropic"
+      ? new ChatAnthropic({ model: modelId, apiKey, maxTokens: MAX_OUTPUT_TOKENS })
+      : new ChatOpenAI({
+          model: modelId,
+          apiKey,
+          maxTokens: MAX_OUTPUT_TOKENS,
+          ...(baseUrl === null ? {} : { configuration: { baseURL: baseUrl } }),
+        });
+
+  return {
+    modelId,
+    async invoke(node, messages) {
+      try {
+        const message = await chat.invoke(messages);
+        return {
+          text: message.text,
+          usage: toUsageEntry({ node, role, model: modelId, usage: message.usage_metadata }),
+        };
+      } catch (error) {
+        if (isModelAccessError(error)) {
+          throw new Error(
+            `Provider "${provider}" rejected model "${modelId}" for the ${role} role — ` +
+              `the credential may not have access to it. ` +
+              `Name another with --model, or set ${modelEnvVar(role)}.`,
+            { cause: error },
+          );
+        }
+        throw error;
+      }
+    },
+  };
+}

@@ -2,8 +2,8 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { buildGraph } from "./graph/index.ts";
+import { PROVIDERS, requireApiKey } from "./llm/factory.ts";
 
-const PROVIDERS = ["anthropic", "openai", "gemini", "openrouter"] as const;
 const CACHE_MODES = ["read-write", "read-only", "off"] as const;
 
 const USAGE = `Usage: npm start -- --spec <path> --output <dir> [options]
@@ -65,6 +65,9 @@ async function main(): Promise<number> {
   );
   const cache = member(values.cache ?? "read-write", CACHE_MODES, "cache");
   const model = values.model ?? "provider default";
+
+  // Fails here rather than mid-run: a missing credential should cost nothing.
+  requireApiKey(provider);
 
   // Fixed at startup rather than generated mid-graph, so a replay writes to the
   // same paths as the run it replays.
