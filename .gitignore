@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.vite/
+*.local
+
+# Secrets — .env.example is committed, .env is not
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# Note: generated-app/ and agent/runs/ are intentionally NOT ignored.
+# The generated application and the run artifacts (plan, tool trace, token
+# ledger, response cache) are part of the deliverable: they let the output be
+# inspected and replayed without spending API credit.
