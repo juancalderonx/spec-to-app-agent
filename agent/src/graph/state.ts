@@ -1,13 +1,21 @@
 import { Annotation } from "@langchain/langgraph";
 
-/** Fixed, domain-neutral vocabulary. Selects which knowledge packs a task loads. */
-export type TaskType =
-  | "component"
-  | "hook"
-  | "test"
-  | "data-layer"
-  | "styling"
-  | "wiring";
+/**
+ * Fixed, domain-neutral vocabulary. Selects which knowledge packs a task loads.
+ *
+ * The array is the declaration and the type is derived from it, so the members
+ * a schema offers a provider and the members the type admits cannot drift.
+ */
+export const TASK_TYPES = [
+  "component",
+  "hook",
+  "test",
+  "data-layer",
+  "styling",
+  "wiring",
+] as const;
+
+export type TaskType = (typeof TASK_TYPES)[number];
 
 export type TaskStatus = "pending" | "done" | "failed";
 
@@ -88,19 +96,26 @@ function accumulate<T>() {
  * The one object every node reads and writes. Only `usage` and `log`
  * accumulate; a state where every field grows costs more than the work it
  * describes.
+ *
+ * **A node is an action and a field is a datum: nodes are verbs, state is
+ * nouns.** `prepare`, `plan`, `generate` and `validate` do something;
+ * `tasks`, `orderedTaskIds` and `reviewReport` are things they produce. Three
+ * fields used to carry their producer's name instead of their own, which the
+ * graph library rejected outright — a node and a channel cannot share a name.
+ * The clash was a naming mistake of ours; the library only pointed at it.
  */
 export const AgentStateAnnotation = Annotation.Root({
   runId: Annotation<string>,
   spec: Annotation<string>,
   outputDir: Annotation<string>,
   surface: overwrite<SurfaceManifest>(() => ({})),
-  plan: overwrite<Task[]>(() => []),
-  order: overwrite<string[]>(() => []),
+  tasks: overwrite<Task[]>(() => []),
+  orderedTaskIds: overwrite<string[]>(() => []),
   cursor: overwrite<number>(() => 0),
   attempts: overwrite<Record<string, number>>(() => ({})),
   status: overwrite<Record<string, TaskStatus>>(() => ({})),
   errors: overwrite<BuildError[]>(() => []),
-  review: overwrite<ReviewReport | null>(() => null),
+  reviewReport: overwrite<ReviewReport | null>(() => null),
   reviewRounds: overwrite<number>(() => 0),
   usage: accumulate<UsageEntry>(),
   log: accumulate<LogEntry>(),

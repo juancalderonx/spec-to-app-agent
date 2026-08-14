@@ -73,18 +73,18 @@ Three routers, each a pure function of state.
 
 ```
 routeAfterOrder(s)
-  s.plan.length === 0 || cycleDetected  → "report"
-  otherwise                             → "generate"
+  s.tasks.length === 0 || cycleDetected  → "report"
+  otherwise                              → "generate"
 
 routeAfterValidate(s)
-  s.errors.length > 0 && attempts[current] <  MAX_REPAIRS  → "repair"
-  s.errors.length > 0 && attempts[current] >= MAX_REPAIRS  → "generate"   // fail, roll back, advance
-  s.errors.length === 0 && cursor + 1 <  order.length      → "generate"   // done, advance
-  s.errors.length === 0 && cursor + 1 >= order.length      → "review"
+  s.errors.length > 0 && attempts[current] <  MAX_REPAIRS       → "repair"
+  s.errors.length > 0 && attempts[current] >= MAX_REPAIRS       → "generate"   // fail, roll back, advance
+  s.errors.length === 0 && cursor + 1 <  orderedTaskIds.length  → "generate"   // done, advance
+  s.errors.length === 0 && cursor + 1 >= orderedTaskIds.length  → "review"
 
 routeAfterReview(s)
-  s.review.gaps.length > 0 && s.reviewRounds < MAX_REVIEW_ROUNDS → "generate"
-  otherwise                                                       → "report"
+  s.reviewReport.gaps.length > 0 && s.reviewRounds < MAX_REVIEW_ROUNDS → "generate"
+  otherwise                                                            → "report"
 ```
 
 `routeAfterValidate` carries the weight: it is simultaneously the repair loop,
@@ -118,7 +118,7 @@ verdict. Generating against a workspace that did not install is wasted spend.
 ### `plan` — spec to task graph
 
 - **Reads:** `spec`, `surface`
-- **Writes:** `plan`, `usage`, `log`
+- **Writes:** `tasks`, `usage`, `log`
 - **Model:** planner role, structured output enforced against a schema
 
 Receives the specification and the *signatures* of what the project already
@@ -137,8 +137,8 @@ prompt. A second failure is terminal.
 
 ### `order` — execution order, computed
 
-- **Reads:** `plan`
-- **Writes:** `order`, `status`, `cursor`, `log`
+- **Reads:** `tasks`
+- **Writes:** `orderedTaskIds`, `status`, `cursor`, `log`
 - **Model:** none
 
 Kahn's algorithm over the `dependsOn` edges. Detects cycles and references to
@@ -151,7 +151,7 @@ diagnosable artifact rather than a stack trace.
 
 ### `generate` — one task at a time
 
-- **Reads:** `plan[cursor]`, `surface`, `spec`
+- **Reads:** `tasks[cursor]`, `surface`, `spec`
 - **Writes:** files on disk, `surface`, `usage`, `log`
 - **Model:** coder role
 
@@ -173,7 +173,7 @@ still fails, the task is marked failed and the cursor advances.
 
 ### `validate` — two signals, never one
 
-- **Reads:** `outputDir`, `plan[cursor]`
+- **Reads:** `outputDir`, `tasks[cursor]`
 - **Writes:** `errors`, `log`
 - **Model:** none
 
@@ -194,7 +194,7 @@ dies quietly is worse than one that reports.
 
 ### `repair` — the only node that sees a file body
 
-- **Reads:** `errors`, `plan[cursor]`, the current contents of the failing file
+- **Reads:** `errors`, `tasks[cursor]`, the current contents of the failing file
 - **Writes:** files on disk, `attempts`, `usage`, `log`
 - **Model:** coder role
 
@@ -208,7 +208,7 @@ enforced by the edge, not the node, so the retry policy lives in one place.
 ### `review` — coverage, not style
 
 - **Reads:** `spec`, `surface`, `status`
-- **Writes:** `review`, `reviewRounds`, `usage`, `log`
+- **Writes:** `reviewReport`, `reviewRounds`, `usage`, `log`
 - **Model:** reviewer role, by default a different model from the coder
 
 Compares the original specification against what was actually built and emits a
@@ -246,13 +246,13 @@ Every node reads and writes this one typed object. Only two fields accumulate.
 | `spec` | `string` | The specification file's contents, verbatim. |
 | `outputDir` | `string` | Absolute. The root of the write sandbox. |
 | `surface` | `SurfaceManifest` | `Record<path, { exports: string[]; signatures: string[] }>`. Never file bodies. |
-| `plan` | `Task[]` | `{ id, description, targetPath, taskType, dependsOn[], acceptance[] }` |
-| `order` | `string[]` | Task ids in topological order, computed by `order`. |
-| `cursor` | `number` | Index into `order`. The task currently in flight. |
+| `tasks` | `Task[]` | `{ id, description, targetPath, taskType, dependsOn[], acceptance[] }` |
+| `orderedTaskIds` | `string[]` | Task ids in topological order, computed by `order`. |
+| `cursor` | `number` | Index into `orderedTaskIds`. The task currently in flight. |
 | `attempts` | `Record<string, number>` | Repair attempts consumed, per task id. |
 | `status` | `Record<string, TaskStatus>` | `"pending" \| "done" \| "failed"` |
 | `errors` | `BuildError[]` | `{ file, line, code, message, source: "tsc" \| "vitest" \| "runner" }` — the current validation result, overwritten each visit. |
-| `review` | `ReviewReport \| null` | `{ gaps: Gap[]; verdict: string }`. Null until `review` runs. |
+| `reviewReport` | `ReviewReport \| null` | `{ gaps: Gap[]; verdict: string }`. Null until `review` runs. |
 | `reviewRounds` | `number` | Review rounds consumed. Ceiling enforced by `routeAfterReview`. |
 | `usage` | `UsageLedger` | **Accumulates.** One entry per model call: node, role, model, input tokens, cached-read tokens, cache-write tokens, output tokens, cost. |
 | `log` | `LogEntry[]` | **Accumulates.** Append-only trace of tool invocations and routing decisions. |
@@ -260,6 +260,12 @@ Every node reads and writes this one typed object. Only two fields accumulate.
 Only `usage` and `log` use an accumulating reducer. Everything else overwrites,
 which is the default. A state where every field accumulates is a state that
 grows without bound and eventually costs more than the work it describes.
+
+**A node is an action and a field is a datum: nodes are verbs, state is nouns.**
+Three fields — `tasks`, `orderedTaskIds`, `reviewReport` — used to carry the
+name of the node that produces them instead of a name of their own. The graph
+library refuses a channel and a node that share a name, which is how the
+mistake surfaced; it was a naming mistake either way.
 
 ---
 

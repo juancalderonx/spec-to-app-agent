@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { buildGraph } from "./graph/index.ts";
-import { PROVIDERS, requireApiKey } from "./llm/factory.ts";
+import { DEFAULT_PROVIDER, PROVIDERS, requireApiKey } from "./llm/factory.ts";
 
 const CACHE_MODES = ["read-write", "read-only", "off"] as const;
 
@@ -59,7 +59,7 @@ async function main(): Promise<number> {
   }
 
   const provider = member(
-    values.provider ?? process.env.LLM_PROVIDER ?? "anthropic",
+    values.provider ?? process.env.LLM_PROVIDER ?? DEFAULT_PROVIDER,
     PROVIDERS,
     "provider",
   );
@@ -79,7 +79,11 @@ async function main(): Promise<number> {
     `run ${runId} · provider ${provider} · model ${model} · cache ${cache}`,
   );
 
-  const result = await buildGraph().invoke({ runId, spec, outputDir });
+  const result = await buildGraph({ provider, model: values.model }).invoke({
+    runId,
+    spec,
+    outputDir,
+  });
   for (const entry of result.log) {
     console.log(`[${entry.node}] ${entry.event}: ${entry.detail}`);
   }

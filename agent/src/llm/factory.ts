@@ -1,5 +1,5 @@
 import { ChatAnthropic } from "@langchain/anthropic";
-import type { BaseMessageLike } from "@langchain/core/messages";
+import { isAIMessage, type BaseMessageLike } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import type { ModelRole, UsageEntry } from "../graph/state.ts";
 import { toUsageEntry } from "./ledger.ts";
@@ -7,6 +7,12 @@ import { toUsageEntry } from "./ledger.ts";
 export const PROVIDERS = ["anthropic", "openai", "gemini", "openrouter"] as const;
 
 export type Provider = (typeof PROVIDERS)[number];
+
+/**
+ * Used when neither `--provider` nor `LLM_PROVIDER` names one. Whoever runs the
+ * agent without arguments needs this provider's credential and no other.
+ */
+export const DEFAULT_PROVIDER: Provider = "anthropic";
 
 interface ProviderConfig {
   /** The one variable this provider needs. No provider reads another's. */
@@ -106,10 +112,26 @@ export interface ModelResponse {
   usage: UsageEntry;
 }
 
+export interface StructuredResponse {
+  /**
+   * Unvalidated on purpose. The provider enforces the schema it was given, but
+   * `strict` is honoured by one adapter only and no JSON Schema can state a
+   * cross-field rule, so the caller validates before use.
+   */
+  value: unknown;
+  usage: UsageEntry;
+}
+
 export interface ModelClient {
   readonly modelId: string;
   /** `node` names the graph node spending, so the ledger attributes the cost. */
   invoke(node: string, messages: BaseMessageLike[]): Promise<ModelResponse>;
+  /** Same call, with the answer's shape enforced by `schema` rather than asked for in prose. */
+  invokeStructured(
+    node: string,
+    messages: BaseMessageLike[],
+    schema: Record<string, unknown>,
+  ): Promise<StructuredResponse>;
 }
 
 export interface ModelOptions {
@@ -139,6 +161,19 @@ export function createModel(options: ModelOptions): ModelClient {
           ...(baseUrl === null ? {} : { configuration: { baseURL: baseUrl } }),
         });
 
+  /** Turns a model-access rejection into a message naming the way out of it. */
+  function explain(error: unknown): unknown {
+    if (isModelAccessError(error)) {
+      return new Error(
+        `Provider "${provider}" rejected model "${modelId}" for the ${role} role — ` +
+          `the credential may not have access to it. ` +
+          `Name another with --model, or set ${modelEnvVar(role)}.`,
+        { cause: error },
+      );
+    }
+    return error;
+  }
+
   return {
     modelId,
     async invoke(node, messages) {
@@ -149,15 +184,32 @@ export function createModel(options: ModelOptions): ModelClient {
           usage: toUsageEntry({ node, role, model: modelId, usage: message.usage_metadata }),
         };
       } catch (error) {
-        if (isModelAccessError(error)) {
-          throw new Error(
-            `Provider "${provider}" rejected model "${modelId}" for the ${role} role — ` +
-              `the credential may not have access to it. ` +
-              `Name another with --model, or set ${modelEnvVar(role)}.`,
-            { cause: error },
-          );
-        }
-        throw error;
+        throw explain(error);
+      }
+    },
+    async invokeStructured(node, messages, schema) {
+      const structured = chat.withStructuredOutput<Record<string, unknown>>(schema, {
+        method: "jsonSchema",
+        includeRaw: true,
+        // Added rather than toggled: the native adapter throws outright when
+        // `strict` is present alongside this method, and only the OpenAI one
+        // honours it. Verified against the installed adapters, not assumed.
+        ...(provider === "openai" ? { strict: true } : {}),
+      });
+
+      try {
+        const { raw, parsed } = await structured.invoke(messages);
+        return {
+          value: parsed,
+          usage: toUsageEntry({
+            node,
+            role,
+            model: modelId,
+            usage: isAIMessage(raw) ? raw.usage_metadata : undefined,
+          }),
+        };
+      } catch (error) {
+        throw explain(error);
       }
     },
   };
