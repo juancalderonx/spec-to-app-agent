@@ -1,7 +1,9 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { DEFAULT_PROVIDER, createModel, type Provider } from "../llm/factory.ts";
+import { order } from "../nodes/order.ts";
 import { plan } from "../nodes/plan.ts";
 import { prepare } from "../nodes/prepare.ts";
+import { routeAfterOrder } from "./routers.ts";
 import { AgentStateAnnotation, type AgentState } from "./state.ts";
 
 /**
@@ -16,6 +18,25 @@ export interface RunOptions {
 }
 
 const DEFAULT_RUN_OPTIONS: RunOptions = { provider: DEFAULT_PROVIDER, model: undefined };
+
+// Placeholder. T-10 replaces `generate` with the node that writes files. It
+// exists now so the conditional edge out of `order` has both of its
+// destinations. Until then a run that reaches it produces no application, and
+// the log says so rather than letting an empty run read as a successful one.
+
+function generate(state: AgentState) {
+  return {
+    log: [
+      {
+        node: "generate",
+        event: "placeholder",
+        detail:
+          `no code was written: ${state.orderedTaskIds.length} ordered tasks ` +
+          `are waiting for the generator`,
+      },
+    ],
+  };
+}
 
 // Placeholder. T-14 replaces `report` with the artifact writer. It carries the
 // name the architecture's graph uses, so the rendered diagram never has to be
@@ -47,10 +68,14 @@ export function buildGraph(options: RunOptions = DEFAULT_RUN_OPTIONS) {
       const { provider, model } = options;
       return plan(state, createModel({ provider, role: "planner", model }));
     })
+    .addNode("order", order)
+    .addNode("generate", generate)
     .addNode("report", report)
     .addEdge(START, "prepare")
     .addConditionalEdges("prepare", routeAfterPrepare, ["plan", "report"])
-    .addEdge("plan", "report")
+    .addEdge("plan", "order")
+    .addConditionalEdges("order", routeAfterOrder, ["generate", "report"])
+    .addEdge("generate", "report")
     .addEdge("report", END)
     .compile();
 }
