@@ -4,6 +4,7 @@ import { generate } from "../nodes/generate.ts";
 import { order } from "../nodes/order.ts";
 import { plan } from "../nodes/plan.ts";
 import { prepare } from "../nodes/prepare.ts";
+import { validate } from "../nodes/validate.ts";
 import { routeAfterOrder } from "./routers.ts";
 import { AgentStateAnnotation, type AgentState } from "./state.ts";
 
@@ -21,10 +22,10 @@ export interface RunOptions {
 const DEFAULT_RUN_OPTIONS: RunOptions = { provider: DEFAULT_PROVIDER, model: undefined };
 
 /**
- * Supersteps one task is allowed to cost: the `generate` visit it costs today,
- * plus the `validate` visit T-12 adds and the two repair visits T-13 bounds it
- * to. Budgeting for those now costs nothing and spares a later run being cut off
- * mid-queue by a limit nobody thought about.
+ * Supersteps one task is allowed to cost: the `generate` and `validate` visits
+ * it costs today, plus the two repair visits T-13 bounds it to. Budgeting for
+ * those now costs nothing and spares a later run being cut off mid-queue by a
+ * limit nobody thought about.
  */
 const STEPS_PER_TASK = 4;
 
@@ -36,10 +37,10 @@ export const MAX_PLAN_TASKS = 40;
 
 /**
  * What `invoke` is given instead of the library's default of 25, which the
- * queue outgrows at 21 tasks today and at 11 once `validate` joins the loop.
- * The loop cannot run away on its own — `cursor` only ever increases and
- * `routeAfterGenerate` stops at the end of the queue — so this is the guard on a
- * plan larger than this agent is built for, not on a cycle.
+ * queue outgrows at 11 tasks now that each one costs a `generate` and a
+ * `validate` visit. The loop cannot run away on its own — `cursor` only ever
+ * increases and `routeAfterValidate` stops at the end of the queue — so this is
+ * the guard on a plan larger than this agent is built for, not on a cycle.
  */
 export const RECURSION_LIMIT = FIXED_STEPS + MAX_PLAN_TASKS * STEPS_PER_TASK;
 
@@ -67,12 +68,13 @@ function routeAfterPrepare(state: AgentState): "plan" | "report" {
 /**
  * One task per visit, so the generator comes back until the queue is spent.
  *
- * Temporary in this shape: `generate` advances the cursor because it is
- * currently the only node that finishes a task. T-12 puts `validate` between
- * the two ends of this edge, and T-13's `routeAfterValidate` takes the advance
- * over — the loop stays, its middle grows.
+ * Temporary in this shape: it asks only whether the queue has more, because
+ * nothing repairs yet. T-13 moves it to `agent/src/graph/routers.ts` with the
+ * two branches that read `errors` — the repair loop and the degradation path —
+ * and takes the cursor advance over from `generate`. The loop is already the
+ * one the architecture draws; its middle is what grows.
  */
-function routeAfterGenerate(state: AgentState): "generate" | "report" {
+function routeAfterValidate(state: AgentState): "generate" | "report" {
   return state.cursor < state.orderedTaskIds.length ? "generate" : "report";
 }
 
@@ -90,12 +92,16 @@ export function buildGraph(options: RunOptions = DEFAULT_RUN_OPTIONS) {
       const { provider, model } = options;
       return generate(state, createModel({ provider, role: "coder", model }));
     })
+    // Called with the state alone: the node's second parameter is the command
+    // runner its tests replace, and the graph would otherwise hand it a config.
+    .addNode("validate", (state) => validate(state))
     .addNode("report", report)
     .addEdge(START, "prepare")
     .addConditionalEdges("prepare", routeAfterPrepare, ["plan", "report"])
     .addEdge("plan", "order")
     .addConditionalEdges("order", routeAfterOrder, ["generate", "report"])
-    .addConditionalEdges("generate", routeAfterGenerate, ["generate", "report"])
+    .addEdge("generate", "validate")
+    .addConditionalEdges("validate", routeAfterValidate, ["generate", "report"])
     .addEdge("report", END)
     .compile();
 }

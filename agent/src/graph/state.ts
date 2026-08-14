@@ -44,7 +44,13 @@ export type SurfaceManifest = Record<string, SurfaceEntry>;
 
 export interface BuildError {
   file: string;
-  line: number;
+  /**
+   * Absent when the output names no line inside the project — a test whose
+   * whole stack is its dependencies', a command that failed before it ran. A
+   * placeholder line would point a repair at the top of a file it did not
+   * come from.
+   */
+  line?: number;
   code: string;
   message: string;
   source: "tsc" | "vitest" | "runner";

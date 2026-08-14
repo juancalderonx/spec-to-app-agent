@@ -266,7 +266,6 @@ function failed(
     errors: [
       {
         file: task.targetPath,
-        line: 0,
         code: "generate-failed",
         message,
         source: "runner",

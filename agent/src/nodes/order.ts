@@ -23,7 +23,6 @@ export function order(state: AgentState): Partial<AgentState> {
       errors: [
         {
           file: state.outputDir,
-          line: 0,
           code: "order-failed",
           message: sorted.reason,
           source: "runner",

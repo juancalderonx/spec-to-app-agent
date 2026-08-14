@@ -90,7 +90,6 @@ function failed(
     errors: [
       {
         file: state.outputDir,
-        line: 0,
         code: "prepare-failed",
         message,
         source: "runner",

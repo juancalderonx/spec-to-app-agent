@@ -93,7 +93,6 @@ function failed(
     errors: [
       {
         file: state.outputDir,
-        line: 0,
         code: "plan-failed",
         message,
         source: "runner",

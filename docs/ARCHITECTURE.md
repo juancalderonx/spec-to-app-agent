@@ -207,10 +207,37 @@ project that does not compile.
 
 Raw output is parsed into `{ file, line, code, message, source }`. The parser
 is unit-tested against captured output, so it is covered without an API key.
+`line` is omitted rather than zeroed when the output names no line inside the
+project — a test whose whole stack belongs to the assertion library, a command
+that failed before it ran — because a placeholder line points a repair at the
+top of a file the error did not come from.
+
+The test runner exits non-zero for two different situations and they are told
+apart here: a failing assertion, and a run that matched no files at all. The
+second happens when a test task writes to a path outside the runner's include
+patterns, and the repair it needs is to move the file, not to change what it
+asserts.
+
+**The conditional test rule costs attribution, and the repair loop has to know
+it.** Running the suite only when a test file changed means a task that breaks
+an *earlier* task's test is not caught when it happens: the failure surfaces on
+the last task of the queue, where the error belongs to a file the current task
+never touched. T-13's repair loop is built on the assumption that the current
+task caused the current error, and that assumption does not hold on the final
+visit. The alternative — running the suite every visit — pays the slow signal on
+every task to shorten a report that arrives either way.
+
+**`errors` is the latest validation, not the run's verdict.** The channel
+overwrites, which is what T-13's repair loop needs: it reads what is wrong
+*now*. It also means a failure recorded against an earlier task is erased by the
+next task validating clean, so the exit code is derived from `status` — where a
+failed task stays failed — and not from this field.
 
 **On failure:** a command that fails to *start* is recorded as a synthetic
-error with `source: "runner"` and flows down the same path. A validator that
-dies quietly is worse than one that reports.
+error with `source: "runner"` and flows down the same path, as is a command that
+exits non-zero without naming a file. A validator that dies quietly is worse
+than one that reports, and one that returns an empty error list from a failed
+command reads as a green run.
 
 ### `repair` — the only node that sees a file body
 
@@ -272,7 +299,7 @@ Every node reads and writes this one typed object. Only two fields accumulate.
 | `cursor` | `number` | Index into `orderedTaskIds`. The task currently in flight. |
 | `attempts` | `Record<string, number>` | Repair attempts consumed, per task id. |
 | `status` | `Record<string, TaskStatus>` | `"pending" \| "done" \| "failed"` |
-| `errors` | `BuildError[]` | `{ file, line, code, message, source: "tsc" \| "vitest" \| "runner" }` — the current validation result, overwritten each visit. |
+| `errors` | `BuildError[]` | `{ file, line?, code, message, source: "tsc" \| "vitest" \| "runner" }` — the current validation result, overwritten each visit. `line` is absent when the output named none. Not the run's verdict: see `validate`. |
 | `reviewReport` | `ReviewReport \| null` | `{ gaps: Gap[]; verdict: string }`. Null until `review` runs. |
 | `reviewRounds` | `number` | Review rounds consumed. Ceiling enforced by `routeAfterReview`. |
 | `usage` | `UsageLedger` | **Accumulates.** One entry per model call: node, role, model, input tokens, cached-read tokens, cache-write tokens, output tokens, cost. |

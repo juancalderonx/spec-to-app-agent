@@ -1,0 +1,12 @@
+
+> car-inventory-boilerplate@1.0.0 typecheck
+> tsc --noEmit
+
+src/components/InventoryList.tsx(18,52): error TS2345: Argument of type 'string' is not assignable to parameter of type 'Car'.
+src/components/InventoryList.tsx(20,25): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(props: { component: ElementType<any, keyof IntrinsicElements>; } & TypographyOwnProps & CommonProps & Omit<any, "className" | ... 112 more ... | "variantMapping">): Element | null', gave the following error.
+    Type '"subtitle3"' is not assignable to type 'OverridableStringUnion<"inherit" | Variant, TypographyPropsVariantOverrides> | undefined'. Did you mean '"subtitle1"'?
+  Overload 2 of 2, '(props: DefaultComponentProps<TypographyTypeMap<{}, "span">>): Element | null', gave the following error.
+    Type '"subtitle3"' is not assignable to type 'OverridableStringUnion<"inherit" | Variant, TypographyPropsVariantOverrides> | undefined'. Did you mean '"subtitle1"'?
+src/components/InventoryList.tsx(20,50): error TS2339: Property 'title' does not exist on type 'Car'.
+src/components/InventoryList.tsx(29,25): error TS2322: Type 'string' is not assignable to type 'number'.

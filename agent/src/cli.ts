@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { GraphRecursionError } from "@langchain/langgraph";
 import { MAX_PLAN_TASKS, RECURSION_LIMIT, buildGraph } from "./graph/index.ts";
 import type { AgentState } from "./graph/state.ts";
+import { failedTasks, runVerdict } from "./graph/verdict.ts";
 import { DEFAULT_PROVIDER, PROVIDERS, requireApiKey } from "./llm/factory.ts";
 import { totalUsage } from "./llm/ledger.ts";
 
@@ -115,9 +116,14 @@ async function main(): Promise<number> {
     console.log(line);
   }
 
-  // Until `report` owns the exit code (T-14), an unresolved error is what makes
-  // a run non-zero.
-  return final.errors.length === 0 ? 0 : 1;
+  // The rule itself lives in `runVerdict`, where it is unit-tested and where
+  // `report` reads it from once T-14 owns the exit code. Deciding it inline here
+  // is how it gets decided differently in two places.
+  const failed = failedTasks(final);
+  if (failed.length > 0) {
+    console.error(`tasks failed: ${failed.join(", ")}`);
+  }
+  return runVerdict(final);
 }
 
 /**
