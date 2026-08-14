@@ -20,10 +20,16 @@ export interface Task {
   acceptance: string[];
 }
 
-/** What a file exposes. Names and signatures only — never a file body. */
+/** One exported name and its signature. Never a file body. */
+export interface SurfaceExport {
+  /** The name an importer writes. `"default"` for a default export. */
+  name: string;
+  signature: string;
+}
+
+/** What a file exposes. */
 export interface SurfaceEntry {
-  exports: string[];
-  signatures: string[];
+  exports: SurfaceExport[];
 }
 
 export type SurfaceManifest = Record<string, SurfaceEntry>;

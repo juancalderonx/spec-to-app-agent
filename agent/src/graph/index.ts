@@ -1,21 +1,10 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
+import { prepare } from "../nodes/prepare.ts";
 import { AgentStateAnnotation, type AgentState } from "./state.ts";
 
-// Placeholders. T-06 replaces `prepare` with the real workspace setup and T-14
-// replaces `report` with the artifact writer. They carry the names the
-// architecture's graph uses, so the rendered diagram never has to be relabelled.
-
-function prepare(state: AgentState) {
-  return {
-    log: [
-      {
-        node: "prepare",
-        event: "placeholder",
-        detail: `would prepare ${state.outputDir} from a ${state.spec.length}-character spec`,
-      },
-    ],
-  };
-}
+// Placeholder. T-14 replaces `report` with the artifact writer. It carries the
+// name the architecture's graph uses, so the rendered diagram never has to be
+// relabelled.
 
 function report(state: AgentState) {
   return {

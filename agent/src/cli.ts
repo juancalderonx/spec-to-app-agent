@@ -84,7 +84,9 @@ async function main(): Promise<number> {
     console.log(`[${entry.node}] ${entry.event}: ${entry.detail}`);
   }
 
-  return 0;
+  // Until `report` owns the exit code (T-14), an unresolved error is what makes
+  // a run non-zero.
+  return result.errors.length === 0 ? 0 : 1;
 }
 
 try {
