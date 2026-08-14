@@ -460,14 +460,22 @@ the architecture document says why it is shaped that way.
   planner produced, what came out green, and what did not. Does **not** edit
   any prompt or pack to make the variant succeed — a change made for the
   variant invalidates the test it exists to perform.
-- **Note:** Expect orphaned scaffolding, and report it rather than fixing it. A
-  specification that needs fewer operations than the provided project ships
-  leaves the previous domain's type, its operations, its mock data and handlers,
-  and the provider wiring in `src/main.tsx` behind as dead code, because no task
-  claims them. Nothing breaks and the type check passes, but the previous domain
-  stays legible in the output. Removing it would mean giving the planner
-  authority to delete files, which is a larger decision than this ticket makes:
-  `docs/generalization.md` is where it gets written down.
+- **Note:** Expect the previous domain to survive unevenly, and treat it as a
+  correctness risk rather than as cosmetic dead code. A file no task claims is
+  left untouched; a file a task *rewrites* — `src/graphql/queries.ts`,
+  `src/mocks/handlers.ts`, `src/mocks/data.ts` — is whatever the coder decided to
+  write that time, since nothing constrains it to keep or to drop what was there.
+  Two runs of the same specification on the same agent build, during T-10,
+  decided it both ways: one kept the previous domain's query and mutation and
+  added the new query beside them, the other replaced the file outright.
+  Each of those runs was internally consistent, which is the part that is not
+  guaranteed: `queries.ts` and `handlers.ts` are written by two different tasks
+  with no edge tying their contents together, so a run that keeps an operation in
+  one and drops it from the other ships an application issuing a request nothing
+  answers. Verify that the two agree, report what the run actually did, and if
+  they disagree say so — `docs/generalization.md` is where it gets written down.
+  Removing the leftovers deliberately would mean giving the planner authority to
+  delete files, which is a larger decision than this ticket makes.
 - **Acceptance criteria:**
   - [ ] The run completes using the same agent build committed in T-15, with
         only the spec and output path changed
