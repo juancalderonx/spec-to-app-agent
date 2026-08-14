@@ -70,10 +70,11 @@ export async function prepare(state: AgentState): Promise<Partial<AgentState>> {
       ),
     );
 
-    // The paths are recorded here and nowhere else: after this node runs, a file
-    // in `surface` may be one a task wrote, and the coder has to be able to tell
-    // what it can import outright from what this run produced.
-    return { surface, projectFiles: Object.keys(surface), log };
+    // Recorded twice on purpose, and this is the only node that writes the
+    // second copy. `surface` goes on to track what each file exports *now*;
+    // `projectSurface` keeps what the project shipped, which is what the coder's
+    // cached prefix carries and what tells it apart from this run's own output.
+    return { surface, projectSurface: surface, log };
   } catch (error) {
     return failed(state, log, error instanceof Error ? error.message : String(error));
   }

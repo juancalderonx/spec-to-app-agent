@@ -1,5 +1,5 @@
 import { ChatAnthropic } from "@langchain/anthropic";
-import { isAIMessage, type BaseMessageLike } from "@langchain/core/messages";
+import { HumanMessage, isAIMessage, type BaseMessageLike } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import type { ModelRole, UsageEntry } from "../graph/state.ts";
 import { toUsageEntry } from "./ledger.ts";
@@ -124,6 +124,14 @@ export interface StructuredResponse {
 
 export interface ModelClient {
   readonly modelId: string;
+  /**
+   * `text` as a message that ends the part of the prompt worth caching.
+   *
+   * The caller decides *what* is stable; the provider decides *how* that is
+   * expressed, which is why this lives here. Everything sent before and
+   * including this message is cached; everything after it is not.
+   */
+  cacheable(text: string): BaseMessageLike;
   /** `node` names the graph node spending, so the ledger attributes the cost. */
   invoke(node: string, messages: BaseMessageLike[]): Promise<ModelResponse>;
   /** Same call, with the answer's shape enforced by `schema` rather than asked for in prose. */
@@ -176,6 +184,22 @@ export function createModel(options: ModelOptions): ModelClient {
 
   return {
     modelId,
+    cacheable(text) {
+      // Marked by hand on this block, rather than through the adapter's
+      // top-level `cache_control` option. That option, by its own
+      // documentation, "applies a cache breakpoint to the last cacheable block"
+      // — which here is the task, the one part that differs every call. It
+      // would write an entry per task and read none, at the write premium.
+      //
+      // Every other provider reaches the OpenAI-compatible adapter, which
+      // caches long prefixes on its own and has no breakpoint to place. Sending
+      // this block shape there would only risk an argument it does not know.
+      return provider === "anthropic"
+        ? new HumanMessage({
+            content: [{ type: "text", text, cache_control: { type: "ephemeral" } }],
+          })
+        : ["human", text];
+    },
     async invoke(node, messages) {
       try {
         const message = await chat.invoke(messages);

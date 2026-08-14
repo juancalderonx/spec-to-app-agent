@@ -2,6 +2,37 @@ import type { UsageMetadata } from "@langchain/core/messages";
 import type { ModelRole, UsageEntry } from "../graph/state.ts";
 import { costUsd } from "./pricing.ts";
 
+/** A run's spend, with the three kinds of input token kept apart. */
+export interface UsageTotals {
+  /** Input tokens billed at full price: neither read from nor written to cache. */
+  inputTokens: number;
+  cachedReadTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+/**
+ * Adds up a run's ledger entries.
+ *
+ * The three input figures stay separate here for the same reason the pricing
+ * table keeps three input rates: collapsing them into one number would hide
+ * whether the prompt cache worked. A run whose cached reads are zero across
+ * consecutive tasks has a defect, and this is where it becomes visible.
+ */
+export function totalUsage(entries: readonly UsageEntry[]): UsageTotals {
+  return entries.reduce<UsageTotals>(
+    (total, entry) => ({
+      inputTokens: total.inputTokens + entry.inputTokens,
+      cachedReadTokens: total.cachedReadTokens + entry.cachedReadTokens,
+      cacheWriteTokens: total.cacheWriteTokens + entry.cacheWriteTokens,
+      outputTokens: total.outputTokens + entry.outputTokens,
+      costUsd: total.costUsd + entry.costUsd,
+    }),
+    { inputTokens: 0, cachedReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, costUsd: 0 },
+  );
+}
+
 export interface CallRecord {
   node: string;
   role: ModelRole;

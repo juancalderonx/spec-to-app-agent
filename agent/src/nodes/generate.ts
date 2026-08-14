@@ -61,11 +61,13 @@ function remember(runId: string, taskId: string, snapshot: Snapshot): void {
 /**
  * Writes the file for one task, and only that one.
  *
- * The prompt is a stable prefix — packs, output contract, specification — then
- * the task and the signatures of its **direct dependencies alone**. That is what
- * keeps a late task's prompt the size of an early one's instead of the size of
- * everything built so far; the ledger entry this node appends is what lets the
- * claim be checked rather than asserted.
+ * The prompt is a stable prefix — standing pack, output contract, specification,
+ * the surface the project shipped — carrying the cache breakpoint, and then the
+ * task: its conventions, its own text, and the signatures of its **direct
+ * dependencies alone**. That is what keeps a late task's prompt the size of an
+ * early one's instead of the size of everything built so far, and what lets the
+ * prefix be paid for once per run rather than once per task; the ledger entry
+ * this node appends is what lets both claims be checked rather than asserted.
  *
  * A written file is not a finished task: `status` stays `pending` until
  * `validate` has two green signals to say otherwise. Only a failure is recorded
@@ -110,8 +112,8 @@ export async function generate(
 
     const messages: BaseMessageLike[] = [
       ["system", CODER_SYSTEM],
-      ["human", coderPrefix(state.spec, packs, projectSignatures(state))],
-      ["human", coderRequest(task, dependencySignatures(state, task))],
+      client.cacheable(coderPrefix(state.spec, packs.standing, state.projectSurface)),
+      ["human", coderRequest(task, dependencySignatures(state, task), packs.conventions)],
     ];
 
     const contents = await ask(client, messages, usage, log);
@@ -121,12 +123,14 @@ export async function generate(
     // write actually landed rather than the relative path the task asked for.
     await writeFileIn(sandbox, absolute, contents);
 
+    const spent = (field: keyof UsageEntry & `${string}Tokens`): number =>
+      usage.reduce((total, entry) => total + entry[field], 0);
     log.push(
       record(
         "wrote",
         `${task.id} → ${task.targetPath} · ${Buffer.byteLength(contents)} bytes · ` +
-          `${usage.reduce((total, entry) => total + entry.inputTokens, 0)} input tokens ` +
-          `via ${client.modelId}`,
+          `${spent("inputTokens")} uncached input, ${spent("cachedReadTokens")} cached read, ` +
+          `${spent("cacheWriteTokens")} cache write · via ${client.modelId}`,
       ),
     );
 
@@ -194,32 +198,13 @@ async function ask(
 }
 
 /**
- * What the provided project exposes, as it stands now.
+ * The signatures of this task's direct dependencies, as they stand now.
  *
- * These files are not produced by any task, so no `dependsOn` edge reaches them
- * and the per-task context alone can never carry them. Without this the coder
- * cannot know the names the project exports and invents its own, which is a
- * defect no amount of repair should have to discover.
- *
- * The path list is fixed by `prepare`; the entries come from the current surface,
- * so a project file a task has rewritten is described as it is now rather than
- * as it shipped. That is the version the next task has to import against.
- */
-function projectSignatures(state: AgentState): SurfaceManifest {
-  const manifest: SurfaceManifest = {};
-  for (const path of state.projectFiles) {
-    const entry = state.surface[path];
-    if (entry !== undefined) {
-      manifest[path] = entry;
-    }
-  }
-  return manifest;
-}
-
-/**
- * The signatures of this task's direct dependencies, minus the project's own
- * files, which the prefix already carries. The two sets are disjoint by path, so
- * nothing is described twice in one prompt.
+ * A project file appears here only when a task rewrote it: `dependsOn` holds
+ * task ids, so a path reaches this map only by being some task's target. That
+ * is why the project's own files are no longer filtered out — the copy in the
+ * cached prefix is the version the project shipped, and this is the version on
+ * disk. The prompt says which is which and which one wins.
  *
  * `dependsOn` carries two kinds of edge: the tasks whose exports this one
  * imports, and the handler task for an operation it issues at runtime, which
@@ -231,12 +216,11 @@ function projectSignatures(state: AgentState): SurfaceManifest {
  */
 function dependencySignatures(state: AgentState, task: Task): SurfaceManifest {
   const targetPaths = new Map(state.tasks.map((candidate) => [candidate.id, candidate.targetPath]));
-  const fromProject = new Set(state.projectFiles);
   const manifest: SurfaceManifest = {};
   for (const dependency of task.dependsOn) {
     const path = targetPaths.get(dependency);
     const entry = path === undefined ? undefined : state.surface[path];
-    if (path !== undefined && entry !== undefined && !fromProject.has(path)) {
+    if (path !== undefined && entry !== undefined) {
       manifest[path] = entry;
     }
   }

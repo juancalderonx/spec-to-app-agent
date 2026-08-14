@@ -1,5 +1,4 @@
 import type { SurfaceManifest, Task } from "../graph/state.ts";
-import type { PackSelection } from "./packs.ts";
 
 /**
  * The coder's standing instructions. Domain-free by construction: every noun
@@ -11,9 +10,9 @@ import type { PackSelection } from "./packs.ts";
  */
 export const CODER_SYSTEM = `You write one file of an existing TypeScript project.
 
-You are given, in this order: the project's standing constraints, the conventions for this kind of file, an example of the output contract, the specification the project is built from, what the project already exposes, and finally the task itself with what its dependencies produced.
+You are given, in this order: the project's standing constraints, an example of the output contract, the specification the project is built from, what the project shipped, and finally the conventions for this kind of file and the task itself with what its dependencies produced.
 
-Those last two are different things and the difference matters. What the project already exposes is on disk right now: import those names exactly as they are written, and never redeclare, rename or re-invent one. What a dependency produced is a file this run wrote for this task to build on. Both are given as signatures — names and types, never bodies.
+What the project shipped and what a dependency produced are different things and the difference matters. What the project shipped was on disk before any of this was written: import those names exactly as they are written, and never redeclare, rename or re-invent one. What a dependency produced is a file this run wrote for this task to build on, and it may be one of the project's own files, rewritten. Where the same file appears in both, the version given with the task is the one on disk now. Both are given as signatures — names and types, never bodies.
 
 A name you were not given does not exist. If the task seems to need one, use the closest thing you were given rather than inventing the name you expected to find.
 
@@ -58,36 +57,52 @@ export function ElapsedLabel({ since, now = new Date() }: ElapsedLabelProps) {
 }`;
 
 /**
- * The part of the prompt that does not change from one task to the next: the
- * packs, the output contract, the specification, and the surface of the files
- * the project already ships.
+ * Everything the run sends unchanged on every task: the standing pack, the
+ * output contract, the specification, and the surface the provided project
+ * shipped.
+ *
+ * This is the text the cache breakpoint is placed on, so its bytes are a pure
+ * function of the specification and the boilerplate. Two things are kept out of
+ * it for that reason, both of which used to be in it:
+ *
+ * - The pack for the task's type, which changes with the task.
+ * - The *current* surface of the project's files. A task that rewrites one —
+ *   the wiring task always rewrites the entry point — would otherwise change the
+ *   prefix mid-run, and every task after it would pay a cache write instead of a
+ *   read. `project` is the frozen reading from `prepare`; the rewritten version
+ *   travels with the task that produced it.
  *
  * The project's surface belongs here rather than beside the task because no task
- * produces those files, so no `dependsOn` edge can ever carry them. Left out,
+ * produces most of those files, so no `dependsOn` edge can carry them. Left out,
  * the coder has no way to learn the names the project exports and invents them
  * instead — a query that does not exist, a second copy of a type it should have
- * imported. It is the same set for every task of a run, so it is sized once, not
- * once per task.
- *
- * Anything constant belongs ahead of the cache breakpoint; anything per-task
- * belongs behind it, or the prefix is not stable and there is nothing to cache.
+ * imported.
  */
 export function coderPrefix(
   spec: string,
-  packs: PackSelection,
+  standing: string,
   project: SurfaceManifest,
 ): string {
   return [
-    packs.text,
+    standing,
     `# The output contract\n\nAn answer looks like this — one file, whole, typed, and about something the specification below never mentions:\n\n\`\`\`tsx\n${OUTPUT_CONTRACT_EXAMPLE}\n\`\`\``,
     `# Specification\n\n${spec.trim()}`,
-    `# What the project already exposes\n\nThese files are on disk. Import these names as written; do not redeclare them and do not invent one that is not here.\n\n${renderSignatures(project, "The project exports nothing.")}`,
+    `# What the project shipped\n\nThese files were on disk before this run started. Import these names as written; do not redeclare them and do not invent one that is not here. If one of them appears again below as something this run produced, that later description is the current one.\n\n${renderSignatures(project, "The project exports nothing.")}`,
   ].join("\n\n");
 }
 
-/** The per-task part: this task, and what its dependencies produced for it. */
-export function coderRequest(task: Task, dependencies: SurfaceManifest): string {
+/**
+ * The per-task part: the conventions for this kind of file, the task, and what
+ * its dependencies produced for it. Everything here changes from one task to the
+ * next, which is why all of it sits behind the cache breakpoint.
+ */
+export function coderRequest(
+  task: Task,
+  dependencies: SurfaceManifest,
+  conventions: string,
+): string {
   return [
+    ...(conventions === "" ? [] : [conventions, ""]),
     `# The task: ${task.id}`,
     "",
     `Write \`${task.targetPath}\`, a ${task.taskType} file.`,

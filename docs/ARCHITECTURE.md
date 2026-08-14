@@ -98,7 +98,7 @@ is unit-tested without an API key.
 ### `prepare` — deterministic setup
 
 - **Reads:** `outputDir`, `spec`
-- **Writes:** `surface`, `log`
+- **Writes:** `surface`, `projectSurface`, `log`
 - **Model:** none
 
 Copies `boilerplate/` into `outputDir` (excluding `node_modules/` and
@@ -151,7 +151,7 @@ diagnosable artifact rather than a stack trace.
 
 ### `generate` — one task at a time
 
-- **Reads:** `tasks[cursor]`, `surface`, `projectFiles`, `spec`
+- **Reads:** `tasks[cursor]`, `surface`, `projectSurface`, `spec`
 - **Writes:** files on disk, `surface`, `usage`, `log`
 - **Model:** coder role
 
@@ -159,22 +159,30 @@ The prompt is assembled as a stable prefix followed by the variable part, in
 that order:
 
 1. the boilerplate rules pack, always injected
-2. the knowledge packs for this task's type
-3. a form-only example, in a shape no specification asks for, showing what a
+2. a form-only example, in a shape no specification asks for, showing what a
    finished answer is
-4. the specification, which is the same bytes on every task of the run
-5. the surface of the files the provided project ships, described as they stand
-6. *(cache breakpoint here)*
+3. the specification, which is the same bytes on every task of the run
+4. the surface of the files the provided project ships, **as `prepare` read
+   them**, before this run wrote anything
+5. *(cache breakpoint here)*
+6. the knowledge packs for this task's type
 7. the task itself, and the signatures of what its **direct dependencies**
    produced in this run
 
-Blocks 5 and 7 are two different claims and the prompt says which is which. No
-task produces the files the project shipped, so no dependency edge can ever
-reach them: a prompt carrying only block 7 leaves the coder unable to learn the
-names the project exports, and it invents them — a query that does not exist, a
-second declaration of a type it should have imported. Block 5 is a fixed set,
-sized once for the run rather than once per task, and the two blocks are
-disjoint by path so nothing is described twice.
+Everything above the breakpoint is a pure function of the specification and the
+boilerplate, which is what makes it cacheable; everything below it changes with
+the task. Blocks 6 and 7 were both above the line at one point, and both had to
+move: a pack chosen by task type is not the same bytes twice in a row, and the
+project's surface *as it stands* changes the moment a task rewrites one of those
+files — which the wiring task always does.
+
+Blocks 4 and 7 are two different claims and the prompt says which is which. Most
+of the files the project shipped are produced by no task, so no dependency edge
+can reach them: a prompt carrying only block 7 leaves the coder unable to learn
+the names the project exports, and it invents them — a query that does not
+exist, a second declaration of a type it should have imported. When a task does
+rewrite one of those files, the rewritten version arrives in block 7, as that
+task's product; the prompt states that the later description is the current one.
 
 Files are written through the sandboxed write tool, which resolves to an
 absolute path and rejects anything outside `outputDir`. Before writing, the
@@ -258,7 +266,7 @@ Every node reads and writes this one typed object. Only two fields accumulate.
 | `spec` | `string` | The specification file's contents, verbatim. |
 | `outputDir` | `string` | Absolute. The root of the write sandbox. |
 | `surface` | `SurfaceManifest` | `Record<path, { exports: string[]; signatures: string[] }>`. Never file bodies. |
-| `projectFiles` | `string[]` | The paths the provided project shipped, fixed by `prepare`. Which files the coder may import without a task having produced them; `surface` still says what each one exports *now*. |
+| `projectSurface` | `SurfaceManifest` | What the provided project exposed when `prepare` read it. Written once and never again, which is what lets it sit in the coder's cached prefix; `surface` still says what each file exports *now*. |
 | `tasks` | `Task[]` | `{ id, description, targetPath, taskType, dependsOn[], acceptance[] }` |
 | `orderedTaskIds` | `string[]` | Task ids in topological order, computed by `order`. |
 | `cursor` | `number` | Index into `orderedTaskIds`. The task currently in flight. |
@@ -320,8 +328,9 @@ large instruction block sent with every task, a small always-injected rules pack
 plus the packs matching the task's type. A component task does not pay for the
 testing conventions, and a test task does not pay for the layout conventions.
 
-Because the always-injected part is byte-identical across every task in a run,
-it is also the natural cache prefix — see section 6.
+The always-injected part is byte-identical across every task in a run, so it is
+also the natural cache prefix — and the type's own pack, which is not, sits
+behind the breakpoint with the task it belongs to. See section 6.
 
 ---
 

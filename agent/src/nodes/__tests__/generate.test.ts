@@ -4,17 +4,33 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, test } from "node:test";
 import type { BaseMessageLike } from "@langchain/core/messages";
-import type { AgentState, Task, UsageEntry } from "../../graph/state.ts";
+import type { AgentState, SurfaceManifest, Task, UsageEntry } from "../../graph/state.ts";
 import type { ModelClient } from "../../llm/factory.ts";
 import { generate, snapshotsFor } from "../generate.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..");
 
-/** No provider is reached: every answer below is fixed in the test. */
-function stub(answers: readonly unknown[]): { client: ModelClient; seen: BaseMessageLike[][] } {
+/**
+ * No provider is reached: every answer below is fixed in the test.
+ *
+ * `cached` records what was handed to `cacheable`, so a test can tell the
+ * message that carries the breakpoint from one that merely looks like it. The
+ * stub returns the plain form, which is what every provider but the native one
+ * does anyway.
+ */
+function stub(answers: readonly unknown[]): {
+  client: ModelClient;
+  seen: BaseMessageLike[][];
+  cached: string[];
+} {
   const seen: BaseMessageLike[][] = [];
+  const cached: string[] = [];
   const client: ModelClient = {
     modelId: "stub",
+    cacheable: (text) => {
+      cached.push(text);
+      return ["human", text];
+    },
     invoke: () => Promise.reject(new Error("generate does not use the unstructured call")),
     invokeStructured: (node, messages) => {
       seen.push([...messages]);
@@ -25,7 +41,7 @@ function stub(answers: readonly unknown[]): { client: ModelClient; seen: BaseMes
       return Promise.resolve({ value: answer, usage: usage(node) });
     },
   };
-  return { client, seen };
+  return { client, seen, cached };
 }
 
 function usage(node: string): UsageEntry {
@@ -69,7 +85,7 @@ function stateFor(runId: string, outputDir: string, tasks: Task[]): AgentState {
     spec: "One screen listing the collection, with a filter over it.",
     outputDir,
     surface: {},
-    projectFiles: [],
+    projectSurface: {},
     tasks,
     orderedTaskIds: tasks.map((entry) => entry.id),
     cursor: 0,
@@ -98,6 +114,14 @@ function tracedPath(line: Record<string, unknown> | undefined): unknown {
 }
 
 const PANEL = "export default function ListPanel() {\n  return null;\n}\n";
+
+/** What `prepare` read before anything was generated. Frozen for the run. */
+const SHIPPED: SurfaceManifest = {
+  "src/App.tsx": { exports: [{ name: "default", signature: "function App()" }] },
+  "src/graphql/queries.ts": {
+    exports: [{ name: "LIST_ITEMS", signature: "const LIST_ITEMS = gql(…)" }],
+  },
+};
 
 test("writes the file, updates the surface and advances the cursor", async () => {
   const runId = "test-generate-writes";
@@ -152,37 +176,27 @@ test("carries the signatures of the direct dependencies and no others", async ()
   assert.doesNotMatch(request, /useUnrelated/);
 });
 
-test("carries the project's own surface, as it stands, in the stable prefix", async () => {
+test("carries the surface the project shipped in the cached prefix", async () => {
   const runId = "test-generate-project-surface";
   const outputDir = await workspace(runId);
-  const { client, seen } = stub([{ contents: PANEL }]);
+  const { client, seen, cached } = stub([{ contents: PANEL }]);
 
   const state = stateFor(runId, outputDir, [task()]);
-  const result = await generate(
-    {
-      ...state,
-      // The project shipped this file; a task earlier in this run rewrote it,
-      // so what the coder is told is the rewritten version.
-      projectFiles: ["src/graphql/queries.ts"],
-      surface: {
-        "src/graphql/queries.ts": {
-          exports: [{ name: "LIST_ITEMS", signature: "const LIST_ITEMS = gql(…)" }],
-        },
-      },
-    },
-    client,
-  );
+  const result = await generate({ ...state, projectSurface: SHIPPED }, client);
 
   assert.equal(result.errors, undefined);
-  // No task produces a project file, so no dependency edge can ever reach one:
-  // the prefix is the only place these signatures can arrive.
+  // Most project files are produced by no task, so no dependency edge can ever
+  // reach them: the prefix is the only place their signatures can arrive.
   const prefix = JSON.stringify(seen[0]?.[1]);
   assert.match(prefix, /src\/graphql\/queries\.ts/);
   assert.match(prefix, /LIST_ITEMS/);
+  // And that same text is what the breakpoint was placed on.
+  assert.equal(cached.length, 1);
+  assert.ok(cached[0]?.includes("LIST_ITEMS"));
 });
 
-test("describes a file once, even when a dependency wrote a project file", async () => {
-  const runId = "test-generate-no-duplicate-surface";
+test("sends a rewritten project file with the task that produced it", async () => {
+  const runId = "test-generate-rewritten-project-file";
   const outputDir = await workspace(runId);
   const { client, seen } = stub([{ contents: PANEL }]);
 
@@ -194,10 +208,10 @@ test("describes a file once, even when a dependency wrote a project file", async
     {
       ...state,
       cursor: 1,
-      projectFiles: ["src/graphql/queries.ts"],
+      projectSurface: SHIPPED,
       surface: {
         "src/graphql/queries.ts": {
-          exports: [{ name: "LIST_ITEMS", signature: "const LIST_ITEMS = gql(…)" }],
+          exports: [{ name: "LIST_ITEMS", signature: "const LIST_ITEMS = gql(…) // rewritten" }],
         },
       },
     },
@@ -205,9 +219,49 @@ test("describes a file once, even when a dependency wrote a project file", async
   );
 
   assert.equal(result.errors, undefined);
-  const request = JSON.stringify(seen[0]?.at(-1));
-  assert.doesNotMatch(request, /src\/graphql\/queries\.ts/);
-  assert.match(JSON.stringify(seen[0]?.[1]), /src\/graphql\/queries\.ts/);
+  // The prefix keeps the version the project shipped — it has to, or it is not
+  // cacheable — so the current one has to travel beside the task.
+  assert.match(JSON.stringify(seen[0]?.at(-1)), /rewritten/);
+  assert.doesNotMatch(JSON.stringify(seen[0]?.[1]), /rewritten/);
+});
+
+test("sends the same prefix bytes after a task has rewritten a project file", async () => {
+  const runId = "test-generate-prefix-is-stable";
+  const outputDir = await workspace(runId);
+  const wiring = "export default function App(props: { title: string }) {\n  return null;\n}\n";
+  const { client, cached } = stub([{ contents: wiring }, { contents: PANEL }]);
+
+  // On disk because the project shipped it: the wiring task overwrites it, and
+  // the node snapshots what it is about to overwrite.
+  await mkdir(join(outputDir, "src"), { recursive: true });
+  await writeFile(join(outputDir, "src/App.tsx"), "export default function App() {}\n");
+
+  const state = {
+    ...stateFor(runId, outputDir, [
+      task({ id: "app-wiring", targetPath: "src/App.tsx", taskType: "wiring" }),
+      task(),
+    ]),
+    projectSurface: SHIPPED,
+    surface: SHIPPED,
+  };
+
+  const wired = await generate(state, client);
+  assert.equal(wired.errors, undefined);
+  // The wiring task rewrote a file the project shipped, which is the ordinary
+  // case rather than a corner one: the entry point always gets rewritten.
+  assert.notDeepEqual(wired.surface?.["src/App.tsx"], SHIPPED["src/App.tsx"]);
+
+  const last = await generate(
+    { ...state, surface: { ...state.surface, ...wired.surface }, cursor: 1 },
+    client,
+  );
+  assert.equal(last.errors, undefined);
+
+  // The whole point of the breakpoint: the prefix of the last task of a run is
+  // byte-for-byte the prefix of the first, so it is read from cache instead of
+  // being paid for again.
+  assert.equal(cached.length, 2);
+  assert.equal(cached[0], cached[1]);
 });
 
 test("refuses a target outside the output directory before paying for an answer", async () => {

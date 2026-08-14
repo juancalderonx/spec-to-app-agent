@@ -14,6 +14,8 @@ function stub(answers: readonly unknown[]): { client: ModelClient; seen: BaseMes
   const seen: BaseMessageLike[][] = [];
   const client: ModelClient = {
     modelId: "stub",
+    // The planner runs once per run, so its prompt has nothing to cache.
+    cacheable: (text) => ["human", text],
     invoke: () => Promise.reject(new Error("plan does not use the unstructured call")),
     invokeStructured: (node, messages) => {
       seen.push([...messages]);
@@ -46,7 +48,9 @@ function stateFor(runId: string): AgentState {
     spec: "One screen listing the collection, with a filter over it.",
     outputDir: join(REPO_ROOT, "tmp-never-written-by-this-test"),
     surface: { "src/main.tsx": { exports: [{ name: "default", signature: "function Main()" }] } },
-    projectFiles: ["src/main.tsx"],
+    projectSurface: {
+      "src/main.tsx": { exports: [{ name: "default", signature: "function Main()" }] },
+    },
     tasks: [],
     orderedTaskIds: [],
     cursor: 0,

@@ -80,16 +80,21 @@ export interface LogEntry {
 }
 
 /**
- * The paths the provided project shipped, fixed by `prepare` before anything is
- * generated.
+ * What the provided project exposed when `prepare` read it, before anything was
+ * generated. Written once and never again.
  *
- * It is a separate field rather than a snapshot of `surface` because the two
+ * It is a separate field rather than a view over `surface` because the two
  * answer different questions: `surface` says what a file exports *now*, and this
- * says which files the coder may import without a task having produced them.
- * A task that rewrites one of these paths updates `surface`; the path stays on
- * this list, so what the coder is told about it is the rewritten version.
+ * says what the project shipped. Holding the signatures rather than only the
+ * paths is what keeps the answer stable — a field of paths would force the
+ * reader back into `surface`, which changes after every task.
+ *
+ * That immutability is what makes it cacheable. It sits in the coder's stable
+ * prefix, so a task that rewrites one of these files must not change it: the
+ * rewritten version travels beside the task instead, as the product of the task
+ * that wrote it.
  */
-type ProjectFiles = string[];
+type ProjectSurface = SurfaceManifest;
 
 /** A field that keeps the last value a node returned, with a starting value. */
 function overwrite<T>(initial: () => T) {
@@ -121,7 +126,7 @@ export const AgentStateAnnotation = Annotation.Root({
   spec: Annotation<string>,
   outputDir: Annotation<string>,
   surface: overwrite<SurfaceManifest>(() => ({})),
-  projectFiles: overwrite<ProjectFiles>(() => []),
+  projectSurface: overwrite<ProjectSurface>(() => ({})),
   tasks: overwrite<Task[]>(() => []),
   orderedTaskIds: overwrite<string[]>(() => []),
   cursor: overwrite<number>(() => 0),

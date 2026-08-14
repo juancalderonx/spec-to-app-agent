@@ -5,6 +5,7 @@ import { GraphRecursionError } from "@langchain/langgraph";
 import { MAX_PLAN_TASKS, RECURSION_LIMIT, buildGraph } from "./graph/index.ts";
 import type { AgentState } from "./graph/state.ts";
 import { DEFAULT_PROVIDER, PROVIDERS, requireApiKey } from "./llm/factory.ts";
+import { totalUsage } from "./llm/ledger.ts";
 
 const CACHE_MODES = ["read-write", "read-only", "off"] as const;
 
@@ -110,9 +111,48 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  for (const line of summarizeUsage(final)) {
+    console.log(line);
+  }
+
   // Until `report` owns the exit code (T-14), an unresolved error is what makes
   // a run non-zero.
   return final.errors.length === 0 ? 0 : 1;
+}
+
+/**
+ * What the run spent, with the three kinds of input token reported apart.
+ *
+ * The cached figures are the only evidence that the prompt cache exists: a
+ * breakpoint placed on a prefix that is not stable, or on one below the model's
+ * cacheable minimum, produces no error at all — just a bill for the whole
+ * prefix on every task. So a run that cached nothing says so rather than
+ * printing three zeros and leaving the reader to notice.
+ *
+ * Until `report` writes `summary.md` (T-14), this is where the run's cost is
+ * read from.
+ */
+function summarizeUsage(final: AgentState): string[] {
+  const total = totalUsage(final.usage);
+  const lines = [
+    `usage · ${final.usage.length} calls · ` +
+      `${total.inputTokens} uncached input · ${total.cachedReadTokens} cached read · ` +
+      `${total.cacheWriteTokens} cache write · ${total.outputTokens} output · ` +
+      `$${total.costUsd.toFixed(4)}`,
+  ];
+  if (total.cacheWriteTokens > 0 && total.cachedReadTokens === 0) {
+    lines.push(
+      "cache: the prefix was written and never read. Something ahead of the " +
+        "breakpoint changes from one task to the next.",
+    );
+  }
+  if (total.cacheWriteTokens === 0 && total.cachedReadTokens === 0 && final.usage.length > 0) {
+    lines.push(
+      "cache: nothing was cached. The stable prefix did not reach the coder " +
+        "model's cacheable minimum, or this provider places no breakpoint.",
+    );
+  }
+  return lines;
 }
 
 /**

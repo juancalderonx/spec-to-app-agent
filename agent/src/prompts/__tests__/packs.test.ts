@@ -12,7 +12,8 @@ test("every task type in the fixed vocabulary has a pack of its own", () => {
       `"${taskType}" fell back to the standing pack. Add agent/knowledge/${taskType}.md.`,
     );
     assert.equal(selection.fallback, null);
-    assert.ok(selection.text.includes("# Standing constraints"));
+    assert.ok(selection.standing.startsWith("# Standing constraints"));
+    assert.notEqual(selection.conventions, "");
   }
 });
 
@@ -20,6 +21,7 @@ test("an unrecognised task type gets the standing pack alone, and says so", () =
   const selection = loadPacks("orchestration");
 
   assert.deepEqual(selection.names, ["rules"]);
-  assert.ok(selection.text.startsWith("# Standing constraints"));
+  assert.ok(selection.standing.startsWith("# Standing constraints"));
+  assert.equal(selection.conventions, "");
   assert.match(selection.fallback ?? "", /orchestration/);
 });

@@ -15,8 +15,18 @@ const STANDING_PACK = "rules";
 export interface PackSelection {
   /** Pack names in injection order: the standing pack, then the type's own. */
   names: string[];
-  /** The packs' text, joined in that order. */
-  text: string;
+  /** The standing pack's text. The same bytes for every task of every run. */
+  standing: string;
+  /**
+   * The text of the pack for this task's type, or `""` when none covers it.
+   *
+   * Kept apart from `standing` rather than joined to it because the two have
+   * different lifetimes: this one changes with the task and so belongs behind
+   * the cache breakpoint, while the standing pack opens the cached prefix.
+   * Joined, the type of the first task would decide what every later task of
+   * another type has to pay to re-send.
+   */
+  conventions: string;
   /**
    * A sentence for the log when the task type had no pack of its own, `null`
    * otherwise. The caller writes it down; degrading in silence would leave a
@@ -44,7 +54,8 @@ export function loadPacks(taskType: string): PackSelection {
   const names = known ? [STANDING_PACK, taskType] : [STANDING_PACK];
   return {
     names,
-    text: names.map(readPack).join("\n\n"),
+    standing: readPack(STANDING_PACK),
+    conventions: known ? readPack(taskType) : "",
     fallback: known
       ? null
       : `No pack covers the task type "${taskType}"; injected "${STANDING_PACK}" alone.`,
