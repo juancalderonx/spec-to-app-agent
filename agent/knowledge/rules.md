@@ -19,6 +19,13 @@ component that branches on it renders one fixed layout under test no matter what
 the test intended — silently, with no error to read. A hook calling
 `window.matchMedia` directly does throw.
 
+The silence is the dangerous half. Every query answering `false` means the
+component always takes the same branch, so a test asserting the behaviour of
+that branch passes without having exercised anything: it is green because the
+default happened to agree with it, not because the logic works. That test keeps
+passing after the logic breaks, and the specification's other branch is never
+covered at all.
+
 Express responsive behaviour through `theme.breakpoints` instead: the
 breakpoint keys in an `sx` value (`sx={{ display: { xs: "none", md: "block" } }}`)
 compile to CSS media queries, which jsdom renders without complaint. If a
@@ -54,9 +61,8 @@ anything at all.
 
 An operation added to `src/graphql/queries.ts` therefore needs a handler added
 beside the existing ones in `src/mocks/handlers.ts`, keyed by the operation
-name. Those are two files and so two tasks: neither is finished on its own. The
-browser worker and the test server share one handler list, so a single addition
-covers both.
+name. The browser worker and the test server share one handler list, so a single
+addition covers both.
 
 ## What finished means
 

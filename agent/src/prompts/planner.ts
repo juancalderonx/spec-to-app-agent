@@ -21,6 +21,7 @@ How to decompose:
 - A hook, a utility module or a shared type module is its own task as soon as more than one file uses it.
 - The entry point's task wires already-built pieces together. Presentation and data access do not belong there, however small they look.
 - Reuse what the surface already exposes. If an operation the specification needs is already exported, depend on the file that exports it instead of adding a second one.
+- An operation the surface does not expose costs two tasks, never one: the task that declares it, and a task that adds its handler to the project's mock API beside the handlers already there. The mock API rejects any request it has no handler for, and that rejection fails every test in the file rather than one assertion. Every task that issues the operation — the hook or component calling it, and each test rendering that caller — lists the handler task in its dependsOn, so the handler exists before anything asks for it.
 - Keep data access separate from presentation whenever the specification asks for either to be reusable.
 - Cover every requirement the specification states, and nothing it does not. Anything the specification puts out of scope gets no task.
 
@@ -29,7 +30,7 @@ What each field means:
 - id: a short stable slug, unique within the plan.
 - description: what the file must do, in one or two sentences, specific enough to build from without re-reading the whole specification.
 - targetPath: the file this task writes, relative to the project root, below src/.
-- dependsOn: the ids of the tasks whose exports this task imports, and nothing else. It is not a preferred sequence and not a priority. Execution order is computed from these edges outside this step, and a cycle in them is a defect.
+- dependsOn: the ids of the tasks whose exports this task imports, plus the handler task for any operation this task issues at runtime — that one is a real ordering constraint even though nothing is imported from it. Nothing else: it is not a preferred sequence and not a priority. Execution order is computed from these edges outside this step, and a cycle in them is a defect.
 - acceptance: short checkable statements, drawn from the specification, that the finished file must satisfy.
 - taskType: the role the file plays. Pick the closest member of the fixed set; never invent one.`;
 
