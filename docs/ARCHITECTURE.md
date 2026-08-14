@@ -216,8 +216,9 @@ still fails, the task is marked failed and the cursor advances.
 
 ### `validate` — two signals, never one
 
-- **Reads:** `outputDir`, the task in flight, `attempts`
-- **Writes:** `errors`, `status`, `log`, and the workspace when it rolls a task back
+- **Reads:** `outputDir`, the task in flight, `attempts`, `surface`
+- **Writes:** `errors`, `status`, `log`, and — when it rolls a task back — the
+  workspace and `surface` with it, so the manifest keeps describing what is on disk
 - **Model:** none
 
 Runs the type checker on every visit. Runs the test suite when the task touched

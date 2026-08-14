@@ -337,11 +337,16 @@ test("keeps each run's snapshots to itself", async () => {
   assert.deepEqual(snapshotsFor(first).get("list-panel"), [
     {
       path: join(await realpath(firstDir), "src/components/ListPanel.tsx"),
+      targetPath: "src/components/ListPanel.tsx",
       contents: "export default null;\n",
     },
   ]);
   assert.deepEqual(snapshotsFor(second).get("list-panel"), [
-    { path: join(await realpath(secondDir), "src/components/ListPanel.tsx"), contents: null },
+    {
+      path: join(await realpath(secondDir), "src/components/ListPanel.tsx"),
+      targetPath: "src/components/ListPanel.tsx",
+      contents: null,
+    },
   ]);
   assert.equal(snapshotsFor("test-generate-never-ran").size, 0);
 });

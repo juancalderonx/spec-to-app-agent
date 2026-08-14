@@ -4,6 +4,16 @@
   four unrelated things fails as one and tells you nothing about which broke.
 - Render with Testing Library and assert what a person sees: role, accessible
   name, visible text. Not internal state, not class names.
+- That prohibition covers every route to how an element *looks*, not only the
+  direct one: no class names, no computed styles, and never a walk over
+  `document.styleSheets` to resolve them. Two reasons, and the second is the one
+  that bites. What a component library paints is its own decision and not a
+  behaviour of this application, so a test asserting it fails the day a theme
+  changes without anything being broken. And the environment the suite runs in
+  is not a browser: it implements enough of the document to render and query,
+  not the CSS engine behind it, so reading a rule out of a stylesheet throws on
+  the environment rather than failing on the assertion — `TypeError: rules.item
+  is not a function` is what that looks like from the outside.
 - Taking an element out of a collection by position gives you `T | undefined`,
   because `noUncheckedIndexedAccess` is on. This is the option that fails
   generated test files more than any other. Assert over the whole collection

@@ -1,6 +1,13 @@
 import { join, resolve } from "node:path";
 import { attributable, repairable, taskInFlight } from "../graph/routers.ts";
-import type { AgentState, BuildError, LogEntry, Task } from "../graph/state.ts";
+import type {
+  AgentState,
+  BuildError,
+  LogEntry,
+  SurfaceManifest,
+  Task,
+} from "../graph/state.ts";
+import { parseSurface } from "../surface/manifest.ts";
 import { openSandbox, removeFileIn, writeFileIn, type Sandbox } from "../tools/fs.ts";
 import { runCommand, type CommandResult } from "../tools/shell.ts";
 import { openTrace } from "../tools/trace.ts";
@@ -157,46 +164,72 @@ async function abandon(
   const spent = state.attempts[task.id] ?? 0;
   const first = errors[0];
   const cause = first === undefined ? "no error was named" : `${first.code}: ${first.message}`;
-
-  let outcome: string;
-  try {
-    const restored = await rollBack(sandbox, state.runId, task.id);
-    outcome = `${restored} files restored`;
-  } catch (error) {
-    outcome = `rollback failed: ${message(error)}`;
-  }
+  const rolledBack = await rollBack(sandbox, state.runId, task.id, state.surface);
 
   return {
     errors: [],
+    surface: rolledBack.surface,
     status: { ...state.status, [task.id]: "failed" },
     log: [
       ...log,
       record(
         "abandoned",
-        `${task.id} after ${spent} repairs · ${outcome} · last error · ${cause}`,
+        `${task.id} after ${spent} repairs · ${rolledBack.outcome} · last error · ${cause}`,
       ),
     ],
   };
 }
 
 /**
- * Undoes every write a task performed, newest first, and answers how many.
+ * Undoes every write a task performed, newest first, and answers with the
+ * surface as the disk now stands.
  *
  * A snapshot holding `null` is a file the task created, so putting it back means
  * deleting it. Both operations go through the sandbox, which is what keeps the
  * one destructive path in the agent behind the same containment check as the
  * writes.
+ *
+ * **The manifest moves with the disk.** `surface` is what every later task is
+ * told the project holds, and `generate` decides from it whether a file it is
+ * about to overwrite needs snapshotting; a manifest still listing a file this
+ * function has just deleted makes the next task targeting that path read a file
+ * that is not there. So a deleted file loses its entry and a restored one has
+ * its entry re-derived from the bytes just written — re-derived rather than
+ * remembered, because the snapshot already carries the contents and a second
+ * copy of what they export is a second thing that can drift.
+ *
+ * The surface it returns covers what was really undone: a rollback that dies
+ * halfway still answers with the entries it managed to put back, since the
+ * alternative is a manifest describing a workspace nobody restored.
  */
-async function rollBack(sandbox: Sandbox, runId: string, taskId: string): Promise<number> {
+async function rollBack(
+  sandbox: Sandbox,
+  runId: string,
+  taskId: string,
+  surface: SurfaceManifest,
+): Promise<{ outcome: string; surface: SurfaceManifest }> {
   const taken = snapshotsFor(runId).get(taskId) ?? [];
-  for (const snapshot of [...taken].reverse()) {
-    if (snapshot.contents === null) {
-      await removeFileIn(sandbox, snapshot.path);
-    } else {
-      await writeFileIn(sandbox, snapshot.path, snapshot.contents);
+  const current: SurfaceManifest = { ...surface };
+  let restored = 0;
+
+  try {
+    for (const snapshot of [...taken].reverse()) {
+      if (snapshot.contents === null) {
+        await removeFileIn(sandbox, snapshot.path);
+        delete current[snapshot.targetPath];
+      } else {
+        await writeFileIn(sandbox, snapshot.path, snapshot.contents);
+        current[snapshot.targetPath] = parseSurface(snapshot.targetPath, snapshot.contents);
+      }
+      restored += 1;
     }
+  } catch (error) {
+    return {
+      outcome: `rollback failed after ${restored} of ${taken.length} files: ${message(error)}`,
+      surface: current,
+    };
   }
-  return taken.length;
+  return { outcome: `${restored} files restored`, surface: current };
 }
 
 /** Whether the queue has nothing left after the task that just finished. */

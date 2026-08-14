@@ -31,6 +31,8 @@ const RETRY_DELAY_MS = 1_000;
 export interface Snapshot {
   /** Absolute, as the sandbox resolved it. */
   path: string;
+  /** The same file relative to the project root, which is how `surface` keys it. */
+  targetPath: string;
   /** The file's text before this task touched it, or `null` if it did not exist. */
   contents: string | null;
 }
@@ -249,6 +251,7 @@ async function keepSnapshot(
   const existed = state.surface[task.targetPath] !== undefined;
   remember(state.runId, task.id, {
     path: absolute,
+    targetPath: task.targetPath,
     contents: existed ? await readFileIn(sandbox, absolute) : null,
   });
 }

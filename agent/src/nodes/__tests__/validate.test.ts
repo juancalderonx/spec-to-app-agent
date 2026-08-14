@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, test } from "node:test";
 import { MAX_REPAIRS_PER_TASK } from "../../graph/routers.ts";
-import type { AgentState, Task, UsageEntry } from "../../graph/state.ts";
+import type { AgentState, SurfaceManifest, Task, UsageEntry } from "../../graph/state.ts";
 import type { ModelClient } from "../../llm/factory.ts";
+import { parseSurface } from "../../surface/manifest.ts";
 import type { CommandResult } from "../../tools/shell.ts";
 import { generate } from "../generate.ts";
 import { validate, type CommandRunner } from "../validate.ts";
@@ -217,7 +218,16 @@ test("marks a task done when both signals come back clean", async () => {
  * keep passing against a node that had stopped taking them.
  */
 const OVERWRITTEN = "export default function ListPanel() {\n  return null;\n}\n";
-const SHIPPED = "export default function ListPanel() {\n  return unchanged;\n}\n";
+
+/**
+ * What the project shipped, exporting under a *name* where the generated file
+ * exports a default.
+ *
+ * The difference is what lets a test tell a restored manifest entry from the one
+ * the task left behind: both files would otherwise parse to the same exports,
+ * and an assertion neither version can fail proves nothing about the rollback.
+ */
+const SHIPPED = "export function ListPanel() {\n  return unchanged;\n}\n";
 
 /**
  * Type-checker output blaming the file the task in flight owns.
@@ -254,16 +264,27 @@ function coder(): ModelClient {
   };
 }
 
-/** A run whose one task has overwritten a file the project shipped. */
+/**
+ * A run whose one task has overwritten a file the project shipped.
+ *
+ * The surface it carries is the one `generate` returned, which is what the graph
+ * hands the next node: it describes the *written* file, so a test can ask what
+ * the rollback did to it.
+ */
 async function afterOverwriting(runId: string, outputDir: string): Promise<AgentState> {
   await mkdir(join(outputDir, "src/components"), { recursive: true });
   await writeFile(join(outputDir, "src/components/ListPanel.tsx"), SHIPPED, "utf8");
 
   const before = stateFor(runId, outputDir, [task()], 0);
-  const shipped = { "src/components/ListPanel.tsx": { exports: [] } };
+  const shipped = { "src/components/ListPanel.tsx": parseSurface("ListPanel.tsx", SHIPPED) };
   const written = await generate({ ...before, surface: shipped }, coder());
 
-  return { ...before, surface: shipped, cursor: written.cursor ?? 1 };
+  return { ...before, surface: written.surface ?? shipped, cursor: written.cursor ?? 1 };
+}
+
+/** The names one file exposes, as the manifest has them. */
+function exportsOf(surface: SurfaceManifest | undefined, path: string): string[] | undefined {
+  return surface?.[path]?.exports.map((entry) => entry.name);
 }
 
 test("leaves the disk alone while the failing task still has repair budget", async () => {
@@ -286,6 +307,8 @@ test("leaves the disk alone while the failing task still has repair budget", asy
   );
   assert.equal(result.status, undefined);
   assert.ok((result.errors?.length ?? 0) > 0);
+  // The manifest is left alone too: it describes the file that is on disk.
+  assert.equal(result.surface, undefined);
 });
 
 test("restores what the task overwrote once its repair budget is spent", async () => {
@@ -301,6 +324,10 @@ test("restores what the task overwrote once its repair budget is spent", async (
 
   assert.equal(await readFile(join(outputDir, "src/components/ListPanel.tsx"), "utf8"), SHIPPED);
   assert.equal(result.status?.["list-panel"], "failed");
+  // The manifest follows the disk: it describes the file that was put back, and
+  // no longer the one the task wrote. A later task reads this to decide what the
+  // project holds, and `generate` reads it to decide what needs snapshotting.
+  assert.deepEqual(exportsOf(result.surface, "src/components/ListPanel.tsx"), ["ListPanel"]);
   // Cleared: they describe a file that has just been put back. The cause
   // survives in the log, which is where a reader goes looking for it.
   assert.deepEqual(result.errors, []);
@@ -342,6 +369,15 @@ test("neither reverts nor blames a task whose failure names no file it owns", as
   assert.match(skipped?.detail ?? "", /InventoryList\.test\.tsx/);
 });
 
+/**
+ * The second half of the same invariant, and the one that shipped broken: the
+ * deletion has to reach the manifest as well as the disk.
+ *
+ * A manifest still listing a file the rollback deleted is what the review's
+ * remediation task walked into in the first full run — it targets the abandoned
+ * file, `generate` reads the manifest, decides the file exists and needs
+ * snapshotting, and the read fails with `ENOENT` before a token is spent.
+ */
 test("deletes a file the failed task created, rather than leaving it behind", async () => {
   const runId = "test-validate-rollback-create";
   const outputDir = await workspace(runId);
@@ -351,13 +387,20 @@ test("deletes a file the failed task created, rather than leaving it behind", as
   const before = stateFor(runId, outputDir, [task()], 0);
   const written = await generate(before, coder());
   assert.equal(existsSync(created), true);
+  assert.deepEqual(exportsOf(written.surface, "src/components/ListPanel.tsx"), ["default"]);
 
   const { run } = runner({ typecheck: ownFailure() });
   const result = await validate(
-    { ...before, cursor: written.cursor ?? 1, attempts: { "list-panel": MAX_REPAIRS_PER_TASK } },
+    {
+      ...before,
+      surface: written.surface ?? {},
+      cursor: written.cursor ?? 1,
+      attempts: { "list-panel": MAX_REPAIRS_PER_TASK },
+    },
     run,
   );
 
   assert.equal(existsSync(created), false);
   assert.equal(result.status?.["list-panel"], "failed");
+  assert.equal(result.surface?.["src/components/ListPanel.tsx"], undefined);
 });
