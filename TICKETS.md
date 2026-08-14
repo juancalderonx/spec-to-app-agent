@@ -398,6 +398,57 @@ the architecture document says why it is shaped that way.
 
 ---
 
+### T-13B — Make a repair that produced nothing diagnosable and free
+
+- **Why:** In the first full run, **five of nine** repair calls came back with
+  `the answer carried no "contents" field`. The event is recorded; the answer is
+  not, so nothing about the cause is knowable — a truncation, a refusal, prose
+  and a differently shaped tool call all look identical from the log. Worse, a
+  malformed answer charges a repair attempt, so `test-add-car` was abandoned
+  "after 2 repairs" without a single correction ever having been sent. Both
+  defects sit directly on Error Recovery, the concept T-13 exists to
+  demonstrate, and both inflate the failed-task count that T-15 commits as its
+  artifact.
+- **Depends on:** T-13
+- **Files:** `agent/src/nodes/repair.ts`, `agent/src/schema/file.ts`,
+  `agent/knowledge/test.md`, `agent/src/nodes/__tests__/repair.test.ts`
+- **Scope:**
+  - An unusable answer is logged with a **bounded digest of what actually
+    arrived** — enough to tell a truncation from a refusal from a wrong shape.
+    A digest, not the answer: the log is committed.
+  - A malformed answer no longer costs the task a repair. It retries the schema
+    once inside the same visit, the way `generate` already does. The attempt is
+    charged when the model answered *in shape* and the correction was wrong —
+    that is the failure the ceiling exists to bound. A schema retry that also
+    fails ends the visit without a rewrite and **is** charged, so a provider
+    that never complies cannot loop.
+  - The test pack carries the usage pattern for `MockedProvider`, which the
+    agent cannot discover: `prepare` deletes `src/__tests__/Example.test.tsx`,
+    the project's only correct example. The run died on `TS2344: Type 'typeof
+    MockedProvider' does not satisfy the constraint '(...args: any) => any'` —
+    it is a class component, so props must not be derived from it. State the
+    pattern; do not name the sample domain.
+  - Establish whether the assertion text reaching `repair` is truncated by the
+    runner or by our own parsing. `expected 'Car InventoryMakeMakeModelModel…'
+    to contain 'Camry'` is not enough evidence to repair from, and the repair
+    model receives exactly what the log shows.
+- **Acceptance criteria:**
+  - [ ] A unit test shows an unusable answer produces a log entry carrying a
+        digest of the response, with no API key present
+  - [ ] A unit test shows a malformed answer followed by a well-formed one
+        rewrites the file and charges **one** attempt
+  - [ ] A unit test shows two malformed answers charge one attempt and rewrite
+        nothing
+  - [ ] Mutation: removing the schema retry fails the test above and nothing else
+  - [ ] The domain-vocabulary guard still passes over the edited pack
+  - [ ] The truncation question is answered in the commit body — either the
+        parser now carries the full assertion text, or the body records that the
+        truncation is the runner's own and cites where
+  - [ ] `npm run typecheck` exits 0
+- **Commit:** `fix(agent): keep a malformed repair answer diagnosable and free`
+
+---
+
 ### T-14 — Review the output and write the run report
 
 - **Why:** The brief asks for self-validation by a secondary model call, and the
