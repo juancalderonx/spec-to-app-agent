@@ -1,5 +1,6 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { DEFAULT_PROVIDER, createModel, type Provider } from "../llm/factory.ts";
+import { generate } from "../nodes/generate.ts";
 import { order } from "../nodes/order.ts";
 import { plan } from "../nodes/plan.ts";
 import { prepare } from "../nodes/prepare.ts";
@@ -19,24 +20,28 @@ export interface RunOptions {
 
 const DEFAULT_RUN_OPTIONS: RunOptions = { provider: DEFAULT_PROVIDER, model: undefined };
 
-// Placeholder. T-10 replaces `generate` with the node that writes files. It
-// exists now so the conditional edge out of `order` has both of its
-// destinations. Until then a run that reaches it produces no application, and
-// the log says so rather than letting an empty run read as a successful one.
+/**
+ * Supersteps one task is allowed to cost: the `generate` visit it costs today,
+ * plus the `validate` visit T-12 adds and the two repair visits T-13 bounds it
+ * to. Budgeting for those now costs nothing and spares a later run being cut off
+ * mid-queue by a limit nobody thought about.
+ */
+const STEPS_PER_TASK = 4;
 
-function generate(state: AgentState) {
-  return {
-    log: [
-      {
-        node: "generate",
-        event: "placeholder",
-        detail:
-          `no code was written: ${state.orderedTaskIds.length} ordered tasks ` +
-          `are waiting for the generator`,
-      },
-    ],
-  };
-}
+/** `prepare`, `plan`, `order`, `review`, `report`, and one spare. */
+const FIXED_STEPS = 6;
+
+/** The longest plan the budget below covers. Named in the message when a run exceeds it. */
+export const MAX_PLAN_TASKS = 40;
+
+/**
+ * What `invoke` is given instead of the library's default of 25, which the
+ * queue outgrows at 21 tasks today and at 11 once `validate` joins the loop.
+ * The loop cannot run away on its own — `cursor` only ever increases and
+ * `routeAfterGenerate` stops at the end of the queue — so this is the guard on a
+ * plan larger than this agent is built for, not on a cycle.
+ */
+export const RECURSION_LIMIT = FIXED_STEPS + MAX_PLAN_TASKS * STEPS_PER_TASK;
 
 // Placeholder. T-14 replaces `report` with the artifact writer. It carries the
 // name the architecture's graph uses, so the rendered diagram never has to be
@@ -59,6 +64,18 @@ function routeAfterPrepare(state: AgentState): "plan" | "report" {
   return state.errors.length > 0 ? "report" : "plan";
 }
 
+/**
+ * One task per visit, so the generator comes back until the queue is spent.
+ *
+ * Temporary in this shape: `generate` advances the cursor because it is
+ * currently the only node that finishes a task. T-12 puts `validate` between
+ * the two ends of this edge, and T-13's `routeAfterValidate` takes the advance
+ * over — the loop stays, its middle grows.
+ */
+function routeAfterGenerate(state: AgentState): "generate" | "report" {
+  return state.cursor < state.orderedTaskIds.length ? "generate" : "report";
+}
+
 export function buildGraph(options: RunOptions = DEFAULT_RUN_OPTIONS) {
   return new StateGraph(AgentStateAnnotation)
     .addNode("prepare", prepare)
@@ -69,13 +86,16 @@ export function buildGraph(options: RunOptions = DEFAULT_RUN_OPTIONS) {
       return plan(state, createModel({ provider, role: "planner", model }));
     })
     .addNode("order", order)
-    .addNode("generate", generate)
+    .addNode("generate", (state) => {
+      const { provider, model } = options;
+      return generate(state, createModel({ provider, role: "coder", model }));
+    })
     .addNode("report", report)
     .addEdge(START, "prepare")
     .addConditionalEdges("prepare", routeAfterPrepare, ["plan", "report"])
     .addEdge("plan", "order")
     .addConditionalEdges("order", routeAfterOrder, ["generate", "report"])
-    .addEdge("generate", "report")
+    .addConditionalEdges("generate", routeAfterGenerate, ["generate", "report"])
     .addEdge("report", END)
     .compile();
 }

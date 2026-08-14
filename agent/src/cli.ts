@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { buildGraph } from "./graph/index.ts";
+import { GraphRecursionError } from "@langchain/langgraph";
+import { MAX_PLAN_TASKS, RECURSION_LIMIT, buildGraph } from "./graph/index.ts";
 import { DEFAULT_PROVIDER, PROVIDERS, requireApiKey } from "./llm/factory.ts";
 
 const CACHE_MODES = ["read-write", "read-only", "off"] as const;
@@ -79,11 +80,12 @@ async function main(): Promise<number> {
     `run ${runId} · provider ${provider} · model ${model} · cache ${cache}`,
   );
 
-  const result = await buildGraph({ provider, model: values.model }).invoke({
-    runId,
-    spec,
-    outputDir,
-  });
+  const result = await buildGraph({ provider, model: values.model }).invoke(
+    { runId, spec, outputDir },
+    // The library's default of 25 supersteps is below what a real plan needs
+    // once each task costs a visit of its own.
+    { recursionLimit: RECURSION_LIMIT },
+  );
   for (const entry of result.log) {
     console.log(`[${entry.node}] ${entry.event}: ${entry.detail}`);
   }
@@ -93,9 +95,26 @@ async function main(): Promise<number> {
   return result.errors.length === 0 ? 0 : 1;
 }
 
+/**
+ * The library's own recursion message names a config key and a documentation
+ * page, which says nothing about the run that hit it. Exhausting this budget
+ * means one thing here: the plan was longer than the agent is built to carry,
+ * since the queue advances one task at a time and never loops back.
+ */
+function explain(error: unknown): string {
+  if (error instanceof GraphRecursionError) {
+    return (
+      `The run exceeded its budget of ${RECURSION_LIMIT} steps, which covers a plan of up to ` +
+      `${MAX_PLAN_TASKS} tasks. This specification decomposed into more than that: narrow it, ` +
+      `or raise MAX_PLAN_TASKS in agent/src/graph/index.ts.`
+    );
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 try {
   process.exitCode = await main();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error(explain(error));
   process.exitCode = 1;
 }
