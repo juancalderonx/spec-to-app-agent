@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env agent/src/cli.ts",
     "typecheck": "tsc --noEmit",
+    "test": "node --test 'agent/src/**/*.test.ts'",
     "graph:mermaid": "node --input-type=module -e \"const { buildGraph } = await import('./agent/src/graph/index.ts'); console.log((await buildGraph().getGraphAsync()).drawMermaid())\""
   },
   "dependencies": {
