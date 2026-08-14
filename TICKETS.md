@@ -510,6 +510,46 @@ the architecture document says why it is shaped that way.
 
 ---
 
+### T-14B — Make `--cache` control the cache the agent actually has
+
+- **Why:** `--cache` is advertised in `--help` as a response cache, parsed
+  (`cli.ts:70`), printed in the run header (`cli.ts:83`), and then consumed by
+  nobody. No response cache exists in `factory.ts` or in any node. An advertised
+  flag that does nothing is the first thing an audit finds, and T-15 carries an
+  acceptance criterion — replaying with `--cache read-only` reproduces the run
+  without a key — that depends on the feature that is missing. The brief states
+  the evaluator supplies their own keys, so a keyless replay is not owed to
+  anyone; what *is* owed is that the flag tells the truth. The prompt cache the
+  agent really has is unconditional today, so the flag has something honest to
+  control, and switching it off is how the 49% input reduction T-11 measured can
+  be reproduced by a reader instead of taken on trust.
+- **Depends on:** T-14
+- **Files:** `agent/src/cli.ts`, `agent/src/llm/factory.ts`,
+  `agent/src/graph/index.ts`, `agent/src/llm/__tests__/factory.test.ts`,
+  `TICKETS.md`
+- **Scope:** The flag selects whether `cacheable()` sets a cache breakpoint or
+  returns the text as an ordinary block, and the choice reaches every role
+  through `RunOptions`. **The modes must name what is implementable:**
+  `read-only` has no meaning for a provider-side prompt cache — a breakpoint is
+  written and read or it is not there at all — so do not keep a mode that cannot
+  be honoured. `--help` says prompt cache, not response cache. Rewrite T-15's
+  last acceptance criterion to match what exists. Does **not** build a response
+  cache, and does **not** change the default, which stays on.
+- **Acceptance criteria:**
+  - [ ] A unit test shows `cacheable()` returns a block carrying no cache
+        control when the flag disables it, and one that does when it does not
+  - [ ] Mutation: ignoring the flag inside the factory fails that test and
+        nothing else
+  - [ ] `npm start -- --help` still lists five flags, and the cache line names
+        the prompt cache
+  - [ ] An unsupported mode is rejected by name, with the accepted ones listed
+  - [ ] T-15's replay criterion is rewritten and the change is explained in the
+        commit body
+  - [ ] `npm run typecheck` exits 0
+- **Commit:** `fix(agent): make --cache control the prompt cache it names`
+
+---
+
 ### T-15 — Commit the generated application from the first full run
 
 - **Why:** Output Quality carries the same weight as the loop. This is the
