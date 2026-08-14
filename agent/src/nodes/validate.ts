@@ -16,8 +16,15 @@ import { snapshotsFor } from "./generate.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 
-/** A test file as the runner's include patterns see it. */
-const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/;
+/**
+ * A test file as the runner's include patterns see it.
+ *
+ * It mirrors vitest's default `include`, which the project does not override: a
+ * name ending in `.test.` or `.spec.` followed by a JavaScript or TypeScript
+ * extension, anywhere in the tree. A file sitting in a `__tests__` directory
+ * under any other name is not collected, however much it looks like a test.
+ */
+const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
 
 /**
  * How a command is run. Defaulted rather than imported at the call site so a
@@ -31,10 +38,17 @@ export type CommandRunner = (sandbox: Sandbox, name: string) => Promise<CommandR
  * output into structured errors.
  *
  * The type checker runs on every visit and the test suite when the finished task
- * wrote a test or was the last of the queue: the suite is the slow signal and it
- * only changes when a test file does. Both are needed, because in this project
- * they disagree by construction — a test relying on the runner's globals passes
- * the suite and fails the type check.
+ * wrote a file the runner collects or was the last of the queue: the suite is the
+ * slow signal and it only changes when a test file does. Both are needed, because
+ * in this project they disagree by construction — a test relying on the runner's
+ * globals passes the suite and fails the type check.
+ *
+ * **The path decides, not `taskType`.** The type is the planner's label for what
+ * a task is about; whether the runner collects the file is a fact about where it
+ * was written. A shared render helper is reasonably typed `test` and is not
+ * collected, so asking the suite about it before any real test exists answers
+ * `no-test-files` — against a file that type-checks clean, whose repair budget is
+ * then spent rewriting code nothing was wrong with.
  *
  * Nothing here repairs, but this node does settle the task it judged, because
  * it is the only one that runs on every path out of a validation: clean, it
@@ -46,7 +60,8 @@ export type CommandRunner = (sandbox: Sandbox, name: string) => Promise<CommandR
  * disagree.
  *
  * A red validation naming no file this task owns settles nothing and reverts
- * nothing: see `unattributable`.
+ * nothing: see `unattributable`. Neither does a *green* one over a task
+ * `generate` already gave up on: see `ungenerated`.
  *
  * `errors` is overwritten each visit, so what it holds afterwards is the latest
  * validation and not the run's verdict — a failure recorded against an earlier
@@ -84,7 +99,7 @@ export async function validate(
   log.push(record("typecheck", typecheck.detail));
   const errors = [...typecheck.errors];
 
-  if (task === undefined || task.taskType === "test" || TEST_FILE.test(task.targetPath) || isLast(state)) {
+  if (task === undefined || TEST_FILE.test(task.targetPath) || isLast(state)) {
     const tests = await signal(
       run,
       sandbox,
@@ -102,6 +117,9 @@ export async function validate(
     return { errors, log };
   }
   if (errors.length === 0) {
+    if (state.status[task.id] === "failed") {
+      return { errors, log: [...log, record("stays-failed", ungenerated(task))] };
+    }
     return { errors, status: { ...state.status, [task.id]: "done" }, log };
   }
   if (!attributable({ ...state, errors })) {
@@ -113,6 +131,26 @@ export async function validate(
     return { errors, log };
   }
   return abandon(state, task, sandbox, errors, log);
+}
+
+/**
+ * Why a clean validation does not make a task `generate` gave up on `done`.
+ *
+ * The task wrote no file, so there is nothing for the type checker to reject and
+ * nothing for the suite to run: both signals come back green about work that was
+ * never done, and settling on that turns a task the run knows failed into one it
+ * reports as built — a missing file that reads as a finished requirement, out of
+ * `openGaps` and out of the exit code.
+ *
+ * It is the mirror of this node's other guard, and of the same mistake: taking
+ * what happened to a task from a signal that was answering about something else.
+ */
+function ungenerated(task: Task): string {
+  return (
+    `${task.id} owns ${task.targetPath}, which generate never wrote · ` +
+    `both signals are clean about a file that is not there · ` +
+    `the task stays failed`
+  );
 }
 
 /**

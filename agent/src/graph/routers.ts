@@ -97,10 +97,16 @@ export function repairsSpent(state: AgentState): number {
  *
  * A visit with no task in flight is not repairable: there is no file to send
  * and no id to charge the attempt to.
+ *
+ * Neither is a task already marked `failed`. For the task in flight that mark can
+ * only have come from `generate`, and it means no file was ever produced: there
+ * is nothing on disk to correct, so every attempt dies reading it and the ceiling
+ * closes two validations later having repaired nothing. One task of the first
+ * full run spent both of its repairs exactly that way.
  */
 export function repairable(state: AgentState): boolean {
   const task = taskInFlight(state);
-  if (task === undefined) {
+  if (task === undefined || state.status[task.id] === "failed") {
     return false;
   }
   return (

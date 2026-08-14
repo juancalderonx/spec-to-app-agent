@@ -588,6 +588,80 @@ the architecture document says why it is shaped that way.
 
 ---
 
+### T-15B — Stop punishing a task for a failure that is not its own
+
+- **Why:** The run committed in T-15 exposed three defects that only appear
+  once the loop runs end to end, and all three make the agent report a worse
+  result than it produced. Two tasks were failed and rolled back for reasons
+  that had nothing to do with the file they wrote, and the run exited 1 with a
+  complete, green application on disk. Error Recovery is a scored concept, and
+  a recovery loop that manufactures its own failures argues against itself.
+  Each of the three carries evidence from `/tmp/run-v2.log` and the committed
+  artifacts of run `2026-08-14T20-57-19-479Z`. The fourth was found while fixing
+  them: it is the same confusion read the other way round, and it reports a
+  better result than the run produced, which is the more expensive direction.
+- **Depends on:** T-15
+- **Files:** `agent/src/nodes/validate.ts`, `agent/src/nodes/repair.ts`,
+  `agent/src/graph/routers.ts`, `agent/src/graph/verdict.ts`,
+  `agent/src/nodes/review.ts`, `agent/src/prompts/reviewer.ts`,
+  `agent/src/cli.ts`, `agent/src/nodes/__tests__/validate.test.ts`,
+  `agent/src/nodes/__tests__/repair.test.ts`,
+  `agent/src/nodes/__tests__/routers.test.ts`,
+  `agent/src/nodes/__tests__/review.test.ts`,
+  `agent/src/graph/__tests__/verdict.test.ts`, `docs/ARCHITECTURE.md`
+  — the last five beyond the three the third defect was first scoped to: the
+  rule about what a run has left open lives in `verdict.ts`, and its readers are
+  `runVerdict` for the exit code, `review` for the unfinished list the reviewer
+  is shown, and the CLI for what it prints beside the exit code.
+- **Scope:**
+  - **The suite runs for a test file, not for a task type.** `validate` decides
+    to run it when `task.taskType === "test"`, which is the planner's label and
+    not a fact about the path. A shared render helper is reasonably typed
+    `test` and is not a file the runner collects, so validating it while no
+    real test exists yet reports `no-test-files` against a file that type-checks
+    clean. It killed `test-utils` at position 5 of 15 and, through the same
+    window, `test-add` at 12. Decide from the path the task wrote — the runner's
+    own include patterns — and from `isLast`.
+  - **A repair does not assume the file is there.** `repair` calls `readFileIn`
+    on `task.targetPath` unconditionally, so a task whose generation never
+    produced a file fails with `ENOENT` on every attempt and spends the budget
+    anyway. Two attempts were burnt this way on `test-add`. Related and worth
+    settling in the same pass: a task `generate` has already marked `failed`
+    should not reach the repair loop at all — it did, twice.
+  - **A remediation settles the task it replaces.** `remediation-1-1` and
+    `remediation-1-2` wrote the two missing files green, and `status` still
+    held `test-add` and `test-utils` as failed. So the verdict counted them,
+    the run exited 1 with nothing wrong on disk, and the reviewer reported the
+    same two gaps again in round 2 about files it could see in the surface.
+    Close the loop: a remediation that succeeds resolves the gap it was made
+    for. Say in `docs/ARCHITECTURE.md` what a failed task means after this.
+  - **A clean validation over nothing is not a task done.** The mirror of the
+    first three, found while fixing them. A task whose generation wrote no file
+    gives the type checker nothing to reject and the suite nothing to run, so
+    `validate` settles it `done` on two green signals about work that was never
+    performed — and the run reports a file that does not exist as a met
+    requirement. The guard has the same shape as the one `repairable` gets:
+    `validate` does not settle a task `generate` already gave up on.
+- **Acceptance criteria:**
+  - [ ] A unit test shows a task writing a non-collected file does not trigger
+        the suite, and one writing a collected file does
+  - [ ] A unit test shows a repair on a missing file reports a diagnosable
+        failure rather than throwing, and a task already marked `failed` is
+        never routed to `repair`
+  - [ ] A unit test shows a successful remediation clears the original task's
+        failure, so `runVerdict` returns 0 for a run whose gaps were all closed
+  - [ ] A unit test shows a clean validation does not settle a task `generate`
+        gave up on, so a file that was never written does not exit 0
+  - [ ] Each of the four is pinned by mutation: reverting it fails its own
+        test and nothing else
+  - [ ] `npm run typecheck` exits 0
+- **Note:** Do **not** re-run the primary specification to prove these. T-16
+  runs the agent against the second specification anyway, and that run is the
+  validation — one execution, both purposes.
+- **Commit:** `fix(agent): stop failing a task for a failure that is not its own`
+
+---
+
 ### T-16 — Verify generalization with a second spec
 
 - **Why:** The brief names memorization as a red flag and states the spec may be

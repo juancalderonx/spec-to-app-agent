@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { after, test } from "node:test";
 import { MAX_REPAIRS_PER_TASK } from "../../graph/routers.ts";
 import type { AgentState, SurfaceManifest, Task, UsageEntry } from "../../graph/state.ts";
+import { runVerdict } from "../../graph/verdict.ts";
 import type { ModelClient } from "../../llm/factory.ts";
 import { parseSurface } from "../../surface/manifest.ts";
 import type { CommandResult } from "../../tools/shell.ts";
@@ -130,6 +131,48 @@ test("skips the suite for a task that touched no test file, and runs it for one 
   assert.deepEqual(tested.called, ["typecheck", "test"]);
 });
 
+/**
+ * The defect this ticket exists for. `taskType` is the planner's label for what
+ * a task is about; whether the runner collects the file is a fact about the path
+ * it wrote. A shared render helper is reasonably typed `test` and is collected by
+ * nothing, so a suite run for it answers `no-test-files` — and the task spends
+ * its whole repair budget rewriting a file that type-checks clean, which is how
+ * the first full run lost its fifth task of fifteen.
+ */
+test("decides the suite from the path the task wrote, not from its type", async () => {
+  const runId = "test-validate-type-is-not-a-path";
+  const outputDir = await workspace(runId);
+  const helper = task({
+    id: "render-helper",
+    targetPath: "src/test-utils/renderWithProviders.tsx",
+    taskType: "test",
+  });
+
+  const uncollected = runner({ test: failing(fixture("no-test-files")) });
+  const skipped = await validate(
+    stateFor(runId, outputDir, [helper, task({ id: "later" })]),
+    uncollected.run,
+  );
+
+  assert.deepEqual(uncollected.called, ["typecheck"]);
+  assert.deepEqual(skipped.errors, []);
+  assert.equal(skipped.status?.["render-helper"], "done");
+
+  // And the other half: a file the include patterns do match is exactly when the
+  // slow signal is worth paying for.
+  const collected = runner({});
+  await validate(
+    stateFor(
+      runId,
+      outputDir,
+      [task({ id: "panel-test", targetPath: "src/components/__tests__/Panel.test.tsx" }), helper],
+    ),
+    collected.run,
+  );
+
+  assert.deepEqual(collected.called, ["typecheck", "test"]);
+});
+
 test("runs the suite for the last task of the queue whatever it wrote", async () => {
   const runId = "test-validate-last";
   const outputDir = await workspace(runId);
@@ -205,6 +248,28 @@ test("marks a task done when both signals come back clean", async () => {
 
   assert.deepEqual(result.errors, []);
   assert.equal(result.status?.["list-panel"], "done");
+});
+
+/**
+ * The mirror of the failure this ticket is about, and the one that reads as
+ * green: a task whose generation never produced a file has nothing for the type
+ * checker to reject and nothing for the suite to run, so both signals come back
+ * clean about work that was never done. Settling on that would take the task out
+ * of `openGaps` and end the run at 0 over a file that does not exist.
+ */
+test("does not mark done a task generate gave up on, however clean the validation", async () => {
+  const runId = "test-validate-generate-failed";
+  const outputDir = await workspace(runId);
+  const { run } = runner({});
+  const abandoned = { ...stateFor(runId, outputDir, [task()]), status: { "list-panel": "failed" as const } };
+
+  const result = await validate(abandoned, run);
+
+  assert.deepEqual(result.errors, []);
+  // No status written at all, so the one `generate` recorded stands.
+  assert.equal(result.status, undefined);
+  assert.equal(result.log?.at(-1)?.event, "stays-failed");
+  assert.equal(runVerdict({ ...abandoned, ...result }), 1);
 });
 
 /**

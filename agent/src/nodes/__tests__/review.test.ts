@@ -153,6 +153,40 @@ test("turns a gap into a task carrying what this run already built", async () =>
   assert.match(prompt, /src\/hooks\/useCollection\.ts/);
 });
 
+/**
+ * Round 2 of the first full run reported as uncovered the two files its own
+ * round-1 remediations had just written, because the unfinished list still
+ * carried the tasks those remediations replaced — and a reviewer told a file is
+ * not what it was asked for believes it over the surface.
+ */
+test("stops calling a file unfinished once a later task wrote it clean", async () => {
+  const abandoned: Task = {
+    id: "collection-filter",
+    description: "Exposes a filter over the collection.",
+    targetPath: GAP.targetPath,
+    taskType: "component",
+    dependsOn: [],
+    acceptance: [GAP.requirement],
+  };
+  const closed: Task = { ...abandoned, id: "remediation-1-1" };
+  const { client, seen } = stub([{ verdict: "Every requirement is covered.", gaps: [] }]);
+
+  await review(
+    stateFor({
+      tasks: [BUILT, abandoned, closed],
+      orderedTaskIds: [BUILT.id, abandoned.id, closed.id],
+      cursor: 3,
+      status: { [BUILT.id]: "done", "collection-filter": "failed", "remediation-1-1": "done" },
+      reviewRounds: 1,
+    }),
+    client,
+  );
+  const request = String(JSON.stringify(seen[0]?.at(-1)));
+
+  assert.equal(request.includes("given up on"), false);
+  assert.match(request, /No file is still as a task that did not finish left it/);
+});
+
 test("queues nothing once the review rounds are spent", async () => {
   const { client } = stub([{ verdict: "Still unmet.", gaps: [GAP] }]);
   const state = stateFor({ reviewRounds: MAX_REVIEW_ROUNDS - 1 });

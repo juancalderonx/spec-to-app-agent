@@ -1,6 +1,7 @@
 import type { BaseMessageLike } from "@langchain/core/messages";
 import { remediable } from "../graph/routers.ts";
 import type { AgentState, Gap, LogEntry, Task, TaskStatus } from "../graph/state.ts";
+import { openGaps } from "../graph/verdict.ts";
 import type { ModelClient } from "../llm/factory.ts";
 import {
   REVIEWER_SYSTEM,
@@ -141,16 +142,24 @@ function remediationTask(state: AgentState, gap: Gap, round: number, index: numb
 }
 
 /**
- * The tasks that ended anywhere other than done, each with how it ended.
+ * The tasks that ended anywhere other than done and whose file is still as they
+ * left it, each with how it ended.
  *
  * The reviewer needs them because a rolled-back task leaves the file exporting
  * whatever it exported before the run, which from the surface alone is
  * indistinguishable from a requirement met.
+ *
+ * A failed task whose gap a later one closed is not among them — see `openGaps`.
+ * Listing it would be describing the file as this run's first attempt left it,
+ * when the second attempt is what is on disk: in the run this was written
+ * against, the round-2 reviewer was told two files were unfinished and duly
+ * reported the same two gaps it had already had remediated.
  */
 function unfinished(state: AgentState): UnfinishedTask[] {
+  const open = new Set(openGaps(state));
   return state.tasks
     .map((task) => ({ task, status: state.status[task.id] ?? ("pending" as TaskStatus) }))
-    .filter((entry) => entry.status !== "done");
+    .filter(({ task, status }) => status !== "done" && (status !== "failed" || open.has(task.id)));
 }
 
 /** `order` writes a status per task it sorted; these arrive after it has run. */

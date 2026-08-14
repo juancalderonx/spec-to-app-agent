@@ -186,6 +186,21 @@ test("reports when the review found nothing, and when it failed outright", () =>
   assert.equal(routeAfterReview(broken), "report");
 });
 
+/**
+ * A task `generate` gave up on wrote no file, so there is nothing for a repair to
+ * correct: every attempt would die reading a path that is not there and the
+ * ceiling would close two validations later having repaired nothing. The first
+ * full run spent both attempts of one task exactly that way.
+ */
+test("refuses to repair a task generate has already marked failed", () => {
+  const state = stateFor({ errors: [FAILURE], status: { first: "failed" } });
+
+  // Attribution and budget both say yes; the task's own outcome is what does not.
+  assert.equal(attributable(state), true);
+  assert.equal(repairable(state), false);
+  assert.equal(routeAfterValidate(state), "generate");
+});
+
 test("refuses to repair a visit with no task in flight", () => {
   const state = stateFor({ cursor: 0, errors: [FAILURE] });
 

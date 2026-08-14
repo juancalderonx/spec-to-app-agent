@@ -87,7 +87,8 @@ attributable(s)
   some error names current.targetPath        // repair may rewrite that file only
 
 repairable(s)
-  attempts[current] < MAX_REPAIRS_PER_TASK && sum(attempts) < MAX_REPAIRS_PER_RUN
+  status[current] !== "failed"               // generate produced no file to correct
+  && attempts[current] < MAX_REPAIRS_PER_TASK && sum(attempts) < MAX_REPAIRS_PER_RUN
 
 routeAfterReview(s)
   s.reviewReport.gaps.length > 0 && s.reviewRounds < MAX_REVIEW_ROUNDS → "generate"
@@ -221,8 +222,18 @@ still fails, the task is marked failed and the cursor advances.
   workspace and `surface` with it, so the manifest keeps describing what is on disk
 - **Model:** none
 
-Runs the type checker on every visit. Runs the test suite when the task touched
-a test file or when it is the last task in the queue.
+Runs the type checker on every visit. Runs the test suite when the task wrote a
+file the runner collects or when it is the last task in the queue.
+
+**The path decides that, not `taskType`.** The type is the planner's label for
+what a task is about; whether the runner collects the file is a fact about where
+it was written, and the two disagree often enough to matter. A shared render
+helper is reasonably typed `test` and matches no include pattern, so a suite run
+for it comes back `no-test-files` about a file that type-checks clean — and the
+task spends its whole repair budget rewriting code nothing was wrong with. That
+is the fifth of fifteen tasks in the first full run, and, through the window it
+opened, the twelfth. The pattern is vitest's own default `include`, which this
+project does not override.
 
 Both signals are required because they disagree by construction in this
 project: a test file that relies on the runner's globals passes the test suite
@@ -276,13 +287,36 @@ work and recording the failure against the one task that could not have caused i
 
 **It also settles the task it judged**, because it is the only node on every
 path out of a validation and edges cannot write. Clean, it writes
-`status: "done"`. Failing with `repairable` false, it restores the snapshot
+`status: "done"` — unless `generate` already gave the task up, in which case it
+writes nothing and the task stays failed. A task that produced no file gives the
+type checker nothing to reject and the suite nothing to run, so both signals come
+back green about work that was never done; settling on that is a missing file
+reported as a finished requirement, and it leaves the run through `openGaps` with
+an exit code of 0. It is the mirror of the failure this section is about, and the
+same mistake: reading what happened to a task off a signal that was answering
+about something else. Failing with `repairable` false, it restores the snapshot
 `generate` took, writes `status: "failed"`, and the run carries on to the next
 task. In between — failing with budget left — it writes no status at all: the
 edge is about to send the task to `repair`, and the task's fate is not decided
 yet. This is the agent's only destructive path, so it is pinned from both sides:
 a test that it reverts when the budget is gone, and a test that it does *not* one
 attempt earlier.
+
+**What `failed` means, and what it does not.** It records what happened to a
+task: this one was given up on and its file was put back. It is history, and it
+is never rewritten — the summary's table showing task 5 failed and task 17 green
+over the same file is the run's own evidence that a failure was recovered from,
+and a counter that reached 17/17 by editing the fifth row would be worth less
+than the two rows. What `failed` does *not* mean is that the run still has a
+problem. A review's remediation task writes the very file the failed task was
+for, and once that validates clean the requirement is met and the workspace is
+whole. So the run's open question is derived rather than stored: `openGaps` is
+the failed tasks whose `targetPath` no other task has since written clean, and it
+is what `runVerdict` counts for the exit code and what `review` subtracts from
+the unfinished list it shows the reviewer. One rule, one home, two readers — the
+first full run had both of them wrong at once, exiting 1 over a complete, green
+application while its round-2 reviewer re-reported two gaps its own round-1
+remediations had already closed.
 
 **`errors` is the latest validation, not the run's verdict.** The channel
 overwrites, which is what the repair loop needs: it reads what is wrong *now*.
@@ -332,6 +366,18 @@ rollback wants — not the broken file the repair is replacing.
 **No retry of its own.** The repair *is* the retry, and how many a task gets is
 the edge's to decide; a loop here would be a second ceiling nobody reads.
 
+**A file that is not there is not a repair.** A correction needs the lines it is
+correcting, so an absent target ends the visit before the provider is reached and
+spends the task's whole repair budget at once: the second attempt would read the
+same absent file, one full validation later. The accepted cost is that those
+unspent attempts still count towards `MAX_REPAIRS_PER_RUN`, which sums
+`attempts` — a missing file charges the run ceiling for two calls nobody made.
+Taken deliberately over a second bookkeeping channel counting calls apart from
+attempts, because the case is now rare: the common cause was a task `generate`
+had already marked `failed`, and `repairable` no longer routes one of those here
+at all. There is nothing on disk for it to correct, and the first full run sent
+one into two repairs that both died on the same `ENOENT`.
+
 **On failure:** increments `attempts` regardless of outcome, so a repair that
 cannot even be issued still walks the task towards the ceiling instead of
 circling below it. The ceiling is enforced by `repairable`, which the edge and
@@ -365,8 +411,8 @@ artifacts of a run: `plan.json` is written by `plan` as soon as a plan
 validates, and `tools.jsonl` by the trace, so a run that dies early still leaves
 both on disk.
 
-`summary.md` carries the run's verdict — 0 when every task is done, 1 when any
-task ended failed — and the node stops there. Setting `process.exitCode` from
+`summary.md` carries the run's verdict — 0 when the run left no gap open, 1 when
+a failed task's file is still as that failure left it — and the node stops there. Setting `process.exitCode` from
 inside a node would decide the exit status of every process that runs the graph,
 the test suite included; `runVerdict` is the rule's one home and the CLI is the
 one caller that turns it into a status.
@@ -390,7 +436,7 @@ Every node reads and writes this one typed object. Only two fields accumulate.
 | `orderedTaskIds` | `string[]` | Task ids in topological order, computed by `order`. |
 | `cursor` | `number` | Index into `orderedTaskIds`. The task currently in flight. |
 | `attempts` | `Record<string, number>` | Repair attempts consumed, per task id. Its sum is the run's repair spend, so the whole-run ceiling needs no field of its own. |
-| `status` | `Record<string, TaskStatus>` | `"pending" \| "done" \| "failed"` |
+| `status` | `Record<string, TaskStatus>` | `"pending" \| "done" \| "failed"`. What happened to each task, never rewritten afterwards. Whether the run still has a problem is a different question, derived by `openGaps`: see `validate`. |
 | `errors` | `BuildError[]` | `{ file, line?, code, message, source: "tsc" \| "vitest" \| "runner" }` — the current validation result, overwritten each visit. `line` is absent when the output named none. Not the run's verdict: see `validate`. |
 | `reviewReport` | `ReviewReport \| null` | `{ gaps: Gap[]; verdict: string }`. Null until `review` runs. |
 | `reviewRounds` | `number` | Review rounds consumed. Ceiling enforced by `routeAfterReview`. |

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, test } from "node:test";
 import type { BaseMessageLike } from "@langchain/core/messages";
+import { MAX_REPAIRS_PER_TASK } from "../../graph/routers.ts";
 import type { AgentState, BuildError, Task, UsageEntry } from "../../graph/state.ts";
 import type { ModelClient } from "../../llm/factory.ts";
 import { repair } from "../repair.ts";
@@ -218,7 +219,13 @@ test("logs a digest of an answer it could not use", async () => {
   assert.match(rejected, /round 1/);
 });
 
-test("charges the attempt when the failing file cannot even be read", async () => {
+/**
+ * A correction needs the lines it is correcting. The run this was written against
+ * sent a task whose generation produced no file into two repairs, and both died
+ * on the same `ENOENT` — a paid round trip's worth of validation each, and a log
+ * line naming a system call rather than the problem.
+ */
+test("says so and stops when the failing file is not on disk, without calling the provider", async () => {
   const runId = "test-repair-missing-file";
   const outputDir = await workspace(runId);
   const { client, seen } = stub([{ contents: FIXED }]);
@@ -226,6 +233,9 @@ test("charges the attempt when the failing file cannot even be read", async () =
   const result = await repair(stateFor(runId, outputDir), client);
 
   assert.equal(seen.length, 0);
-  assert.equal(result.attempts?.["list-panel"], 1);
-  assert.equal(result.log?.[0]?.event, "failed");
+  assert.equal(result.usage, undefined);
+  // The whole budget at once: the second attempt would read the same absent file.
+  assert.equal(result.attempts?.["list-panel"], MAX_REPAIRS_PER_TASK);
+  assert.equal(result.log?.[0]?.event, "missing");
+  assert.match(result.log?.[0]?.detail ?? "", /src\/components\/ListPanel\.tsx/);
 });

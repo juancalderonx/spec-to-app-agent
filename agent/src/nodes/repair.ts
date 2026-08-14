@@ -1,13 +1,13 @@
 import { join, resolve } from "node:path";
 import type { BaseMessageLike } from "@langchain/core/messages";
-import { taskInFlight } from "../graph/routers.ts";
+import { MAX_REPAIRS_PER_TASK, taskInFlight } from "../graph/routers.ts";
 import type { AgentState, LogEntry, UsageEntry } from "../graph/state.ts";
 import type { ModelClient } from "../llm/factory.ts";
 import { CODER_SYSTEM, coderCorrection, coderPrefix, repairRequest } from "../prompts/coder.ts";
 import { loadPacks } from "../prompts/packs.ts";
 import { digestAnswer, FILE_SCHEMA, readContents } from "../schema/file.ts";
 import { parseSurface } from "../surface/manifest.ts";
-import { openSandbox, readFileIn, writeFileIn } from "../tools/fs.ts";
+import { openSandbox, readFileIn, writeFileIn, type Sandbox } from "../tools/fs.ts";
 import { openTrace } from "../tools/trace.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
@@ -46,6 +46,16 @@ const MAX_SCHEMA_ROUNDS = 2;
  * It does not snapshot. The snapshot `generate` kept is the state before the
  * task began, which is what a rollback wants — not the state before the repair,
  * which is the broken file.
+ *
+ * **A file that is not there is not a repair.** A correction needs the lines it
+ * is correcting, so an absent target ends the visit before the provider is
+ * reached, and spends the task's whole repair budget at once: the second attempt
+ * would read the same absent file and learn the same thing, one full validation
+ * later. The accepted cost is that those unspent attempts still count towards
+ * `MAX_REPAIRS_PER_RUN`, which sums `attempts` — so a missing file charges the
+ * run ceiling for two provider calls nobody made. Taken deliberately: separating
+ * "attempts spent" from "calls made" is a second bookkeeping channel for a case
+ * that is rare now that a task `generate` failed no longer reaches this node.
  */
 export async function repair(
   state: AgentState,
@@ -68,7 +78,19 @@ export async function repair(
 
   try {
     const sandbox = await openSandbox(state.outputDir, trace);
-    const body = await readFileIn(sandbox, task.targetPath);
+    const body = await bodyOf(sandbox, task.targetPath);
+    if (body === null) {
+      return {
+        attempts: { ...state.attempts, [task.id]: MAX_REPAIRS_PER_TASK },
+        log: [
+          record(
+            "missing",
+            `${task.id}: ${task.targetPath} is not on disk, so there is nothing to correct · ` +
+              `its ${MAX_REPAIRS_PER_TASK} repairs are spent here rather than one absent file at a time`,
+          ),
+        ],
+      };
+    }
 
     const packs = loadPacks(task.taskType);
     const messages: BaseMessageLike[] = [
@@ -136,6 +158,24 @@ export async function repair(
       usage,
       log: [...log, record("failed", `${task.id} attempt ${attempt}: ${message}`)],
     };
+  }
+}
+
+/**
+ * The file's current text, or `null` when it is not there.
+ *
+ * Only absence is answered with `null`. A read that fails for any other reason —
+ * a directory in the way, a permission — is a broken workspace and travels up as
+ * itself, rather than being reported as a task whose file was never written.
+ */
+async function bodyOf(sandbox: Sandbox, path: string): Promise<string | null> {
+  try {
+    return await readFileIn(sandbox, path);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
   }
 }
 

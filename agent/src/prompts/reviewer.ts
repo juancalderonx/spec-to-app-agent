@@ -1,10 +1,13 @@
 import type { SurfaceManifest, Task, TaskStatus } from "../graph/state.ts";
 
 /**
- * A task that ended anywhere other than done, paired with how it ended.
+ * A task that ended anywhere other than done and whose file is still as it left
+ * it, paired with how it ended.
  *
- * Paired by the caller rather than looked up here, so this module renders what
- * it is given and decides nothing about which tasks qualify.
+ * Paired *and filtered* by the caller rather than looked up here, so this module
+ * renders what it is given and decides nothing about which tasks qualify: a
+ * failed task whose file a later one wrote clean is not one of these, and the
+ * rule that says so lives in `openGaps`.
  */
 export interface UnfinishedTask {
   task: Task;
@@ -80,14 +83,19 @@ function renderSurface(surface: SurfaceManifest): string {
 }
 
 /**
- * The tasks that ended anywhere other than done, and what each was supposed to
+ * The tasks that left something unfinished, and what each was supposed to
  * produce. A task still marked pending here was attempted and never came back
  * clean, which the reviewer has to be able to tell apart from one that was
  * rolled back.
+ *
+ * Every entry describes a file as it stands now. A task that failed and had its
+ * gap closed by a later one is not sent, because what its description says was
+ * "to be" is by then done — and a reviewer told otherwise reports it as a gap
+ * against the surface where it can see the work.
  */
 function renderUnfinished(unfinished: readonly UnfinishedTask[]): string {
   if (unfinished.length === 0) {
-    return "None. Every task finished and was validated.";
+    return "None. No file is still as a task that did not finish left it.";
   }
   return unfinished
     .map(({ task, status }) => {

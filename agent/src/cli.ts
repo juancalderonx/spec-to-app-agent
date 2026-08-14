@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import { GraphRecursionError } from "@langchain/langgraph";
 import { MAX_PLAN_TASKS, RECURSION_LIMIT, buildGraph } from "./graph/index.ts";
 import type { AgentState } from "./graph/state.ts";
-import { failedTasks, runVerdict } from "./graph/verdict.ts";
+import { openGaps, runVerdict } from "./graph/verdict.ts";
 import { DEFAULT_PROVIDER, PROVIDERS, requireApiKey } from "./llm/factory.ts";
 import { totalUsage } from "./llm/ledger.ts";
 
@@ -127,10 +127,13 @@ async function main(): Promise<number> {
   // the one place a process reads it: `report` writes the same verdict into
   // `summary.md` and sets nothing, because a node that writes `process.exitCode`
   // changes the exit status of every process that runs the graph — the test
-  // suite included.
-  const failed = failedTasks(final);
-  if (failed.length > 0) {
-    console.error(`tasks failed: ${failed.join(", ")}`);
+  // suite included. What is named here is what the verdict counted — the gaps
+  // still open, not every task that ever failed: a task the run gave up on and a
+  // later one wrote clean is in the log and in the summary's table already, and
+  // naming it beside an exit code of 0 would read as a contradiction.
+  const open = openGaps(final);
+  if (open.length > 0) {
+    console.error(`gaps left open: ${open.join(", ")}`);
   }
   return runVerdict(final);
 }
