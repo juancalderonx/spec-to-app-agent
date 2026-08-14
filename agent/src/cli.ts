@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { GraphRecursionError } from "@langchain/langgraph";
 import { MAX_PLAN_TASKS, RECURSION_LIMIT, buildGraph } from "./graph/index.ts";
+import type { AgentState } from "./graph/state.ts";
 import { DEFAULT_PROVIDER, PROVIDERS, requireApiKey } from "./llm/factory.ts";
 
 const CACHE_MODES = ["read-write", "read-only", "off"] as const;
@@ -80,19 +81,38 @@ async function main(): Promise<number> {
     `run ${runId} · provider ${provider} · model ${model} · cache ${cache}`,
   );
 
-  const result = await buildGraph({ provider, model: values.model }).invoke(
+  // Streamed rather than invoked: a run takes minutes, and `invoke` returns
+  // only once the whole graph is done, so every line would arrive at the end at
+  // once. `"values"` hands over the complete state after each superstep, which
+  // is both the line to print now and, at the last one, the state the exit code
+  // reads — nothing has to be re-accumulated here to get it.
+  const states = await buildGraph({ provider, model: values.model }).stream(
     { runId, spec, outputDir },
     // The library's default of 25 supersteps is below what a real plan needs
     // once each task costs a visit of its own.
-    { recursionLimit: RECURSION_LIMIT },
+    { recursionLimit: RECURSION_LIMIT, streamMode: "values" },
   );
-  for (const entry of result.log) {
-    console.log(`[${entry.node}] ${entry.event}: ${entry.detail}`);
+
+  // `log` accumulates across the run, so each state carries the lines already
+  // printed. The cursor is what keeps a line from being printed twice.
+  let printed = 0;
+  let final: AgentState | undefined;
+  for await (const state of states) {
+    for (const entry of state.log.slice(printed)) {
+      console.log(`[${entry.node}] ${entry.event}: ${entry.detail}`);
+    }
+    printed = state.log.length;
+    final = state;
+  }
+
+  if (final === undefined) {
+    console.error("The graph produced no state. Nothing ran.");
+    return 1;
   }
 
   // Until `report` owns the exit code (T-14), an unresolved error is what makes
   // a run non-zero.
-  return result.errors.length === 0 ? 0 : 1;
+  return final.errors.length === 0 ? 0 : 1;
 }
 
 /**
