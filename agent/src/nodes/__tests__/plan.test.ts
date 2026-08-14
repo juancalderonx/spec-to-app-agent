@@ -46,6 +46,7 @@ function stateFor(runId: string): AgentState {
     spec: "One screen listing the collection, with a filter over it.",
     outputDir: join(REPO_ROOT, "tmp-never-written-by-this-test"),
     surface: { "src/main.tsx": { exports: [{ name: "default", signature: "function Main()" }] } },
+    projectFiles: ["src/main.tsx"],
     tasks: [],
     orderedTaskIds: [],
     cursor: 0,

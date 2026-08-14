@@ -1,7 +1,7 @@
 # Component tasks
 
-- One unit of presentation per file, exported as the file's default export, with
-  the function named after the file.
+- One unit of presentation per file, exported by name, with the function named
+  after the file.
 - Export the props type by name from the same file so a parent can type its own
   state against it. Type props exactly; `any` and assertions that silence the
   compiler are defects, not shortcuts.

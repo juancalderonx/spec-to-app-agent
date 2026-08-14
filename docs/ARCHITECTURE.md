@@ -151,7 +151,7 @@ diagnosable artifact rather than a stack trace.
 
 ### `generate` — one task at a time
 
-- **Reads:** `tasks[cursor]`, `surface`, `spec`
+- **Reads:** `tasks[cursor]`, `surface`, `projectFiles`, `spec`
 - **Writes:** files on disk, `surface`, `usage`, `log`
 - **Model:** coder role
 
@@ -160,9 +160,21 @@ that order:
 
 1. the boilerplate rules pack, always injected
 2. the knowledge packs for this task's type
-3. a form-only few-shot example in a domain unrelated to the specification
-4. *(cache breakpoint here)*
-5. the task itself, and the signatures of its **direct dependencies only**
+3. a form-only example, in a shape no specification asks for, showing what a
+   finished answer is
+4. the specification, which is the same bytes on every task of the run
+5. the surface of the files the provided project ships, described as they stand
+6. *(cache breakpoint here)*
+7. the task itself, and the signatures of what its **direct dependencies**
+   produced in this run
+
+Blocks 5 and 7 are two different claims and the prompt says which is which. No
+task produces the files the project shipped, so no dependency edge can ever
+reach them: a prompt carrying only block 7 leaves the coder unable to learn the
+names the project exports, and it invents them — a query that does not exist, a
+second declaration of a type it should have imported. Block 5 is a fixed set,
+sized once for the run rather than once per task, and the two blocks are
+disjoint by path so nothing is described twice.
 
 Files are written through the sandboxed write tool, which resolves to an
 absolute path and rejects anything outside `outputDir`. Before writing, the
@@ -246,6 +258,7 @@ Every node reads and writes this one typed object. Only two fields accumulate.
 | `spec` | `string` | The specification file's contents, verbatim. |
 | `outputDir` | `string` | Absolute. The root of the write sandbox. |
 | `surface` | `SurfaceManifest` | `Record<path, { exports: string[]; signatures: string[] }>`. Never file bodies. |
+| `projectFiles` | `string[]` | The paths the provided project shipped, fixed by `prepare`. Which files the coder may import without a task having produced them; `surface` still says what each one exports *now*. |
 | `tasks` | `Task[]` | `{ id, description, targetPath, taskType, dependsOn[], acceptance[] }` |
 | `orderedTaskIds` | `string[]` | Task ids in topological order, computed by `order`. |
 | `cursor` | `number` | Index into `orderedTaskIds`. The task currently in flight. |
@@ -275,8 +288,17 @@ mistake surfaced; it was a naming mistake either way.
 `repair`, and only for the one file that failed.**
 
 What travels instead is the **surface manifest**: for each file, the names it
-exports and their signatures. A task that depends on two earlier tasks receives
-the signatures of those two, and nothing else.
+exports and their signatures. A task receives two slices of it, and the prompt
+keeps them apart: the files the provided project ships, which are the same set
+for every task of the run, and the files this run produced for the two or three
+tasks it depends on. Nothing else — not the files other tasks wrote, not a body,
+not the whole manifest.
+
+The first slice is not optional. No task produces the provided project's files,
+so no `dependsOn` edge points at one, and a task told only about its
+dependencies cannot discover the operations and types the project already
+exports. It invents them instead, and the invention type-checks in isolation and
+fails against everything around it.
 
 Three reasons, in order of weight:
 

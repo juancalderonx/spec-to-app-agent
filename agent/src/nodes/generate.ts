@@ -110,7 +110,7 @@ export async function generate(
 
     const messages: BaseMessageLike[] = [
       ["system", CODER_SYSTEM],
-      ["human", coderPrefix(state.spec, packs)],
+      ["human", coderPrefix(state.spec, packs, projectSignatures(state))],
       ["human", coderRequest(task, dependencySignatures(state, task))],
     ];
 
@@ -194,7 +194,32 @@ async function ask(
 }
 
 /**
- * The signatures of this task's direct dependencies, and nothing else.
+ * What the provided project exposes, as it stands now.
+ *
+ * These files are not produced by any task, so no `dependsOn` edge reaches them
+ * and the per-task context alone can never carry them. Without this the coder
+ * cannot know the names the project exports and invents its own, which is a
+ * defect no amount of repair should have to discover.
+ *
+ * The path list is fixed by `prepare`; the entries come from the current surface,
+ * so a project file a task has rewritten is described as it is now rather than
+ * as it shipped. That is the version the next task has to import against.
+ */
+function projectSignatures(state: AgentState): SurfaceManifest {
+  const manifest: SurfaceManifest = {};
+  for (const path of state.projectFiles) {
+    const entry = state.surface[path];
+    if (entry !== undefined) {
+      manifest[path] = entry;
+    }
+  }
+  return manifest;
+}
+
+/**
+ * The signatures of this task's direct dependencies, minus the project's own
+ * files, which the prefix already carries. The two sets are disjoint by path, so
+ * nothing is described twice in one prompt.
  *
  * `dependsOn` carries two kinds of edge: the tasks whose exports this one
  * imports, and the handler task for an operation it issues at runtime, which
@@ -206,11 +231,12 @@ async function ask(
  */
 function dependencySignatures(state: AgentState, task: Task): SurfaceManifest {
   const targetPaths = new Map(state.tasks.map((candidate) => [candidate.id, candidate.targetPath]));
+  const fromProject = new Set(state.projectFiles);
   const manifest: SurfaceManifest = {};
   for (const dependency of task.dependsOn) {
     const path = targetPaths.get(dependency);
     const entry = path === undefined ? undefined : state.surface[path];
-    if (path !== undefined && entry !== undefined) {
+    if (path !== undefined && entry !== undefined && !fromProject.has(path)) {
       manifest[path] = entry;
     }
   }

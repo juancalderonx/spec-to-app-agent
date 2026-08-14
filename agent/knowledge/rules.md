@@ -2,9 +2,37 @@
 
 These hold for every file in this project. They describe how the provided setup
 behaves, which is the part reading the source does not tell you until a test has
-already failed. Everything else — the compiler options, the import alias, the
-dependency list, the operations the project exposes — is on disk and in the
-surface you were given; this pack does not repeat it.
+already failed.
+
+## The compiler options you cannot see
+
+The surface you are given covers source files, not configuration, so these are
+stated here. Three of them reject code that would compile anywhere else:
+
+- Indexing an array or a lookup yields `T | undefined`, always. A value taken
+  from a list has to be narrowed before it is used — not asserted, narrowed.
+  This is the option that catches most generated test files, where a row or an
+  element is pulled out by position and passed straight to an assertion.
+- An unused local or an unused parameter is an error, not a warning.
+- `strict` is on in full. No implicit `any`, no implicit `this`, no unchecked
+  null.
+
+Two more that shape how a file is written: the path alias `@/` resolves to the
+project's `src/`, and a library's names are imported from its package root —
+never from a path inside the package, which is not part of its public surface
+and does not export what the root exports.
+
+## Every file you write exports by name
+
+`export function`, `export const`, `export interface`. No default export, and
+never both forms in one file. The import side follows from it, and one settled
+convention removes a whole class of failure: a module whose export form has to
+be guessed is imported the wrong way about half the time, and the guess costs a
+repair cycle to discover.
+
+One file is fixed by the provided setup and keeps its default export:
+`src/App.tsx`, because `src/main.tsx` imports it as one and no task rewrites
+`src/main.tsx`. Everything else is named.
 
 The project is React with MUI for presentation, Apollo Client for GraphQL, MSW
 for the mock API, and Vitest with Testing Library under jsdom for the tests.

@@ -51,6 +51,7 @@ function stateFor(tasks: Task[]): AgentState {
     spec: "",
     outputDir: "/tmp-never-written-by-this-test",
     surface: {},
+    projectFiles: [],
     tasks,
     orderedTaskIds: [],
     cursor: 0,

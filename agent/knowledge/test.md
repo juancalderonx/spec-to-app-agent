@@ -4,6 +4,22 @@
   four unrelated things fails as one and tells you nothing about which broke.
 - Render with Testing Library and assert what a person sees: role, accessible
   name, visible text. Not internal state, not class names.
+- Taking an element out of a collection by position gives you `T | undefined`,
+  because `noUncheckedIndexedAccess` is on. This is the option that fails
+  generated test files more than any other. Assert over the whole collection
+  where you can, so nothing is pulled out at all:
+
+      expect(rows.map((row) => row.textContent)).toEqual([…]);
+
+  When one element is genuinely needed, narrow it with a check that throws. A
+  matcher does not narrow anything for the compiler — after
+  `expect(row).toBeDefined()` the type is still `T | undefined`:
+
+      const row = rows[0];
+      if (row === undefined) {
+        throw new Error("expected at least one row");
+      }
+      // an element from here on, and the failure says what was missing
 - Give the subject its data through `MockedProvider` from
   `@apollo/client/testing`, with one fixture per operation the subject issues.
   The test renders that subject directly, so it inherits none of the providers

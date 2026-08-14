@@ -70,7 +70,10 @@ export async function prepare(state: AgentState): Promise<Partial<AgentState>> {
       ),
     );
 
-    return { surface, log };
+    // The paths are recorded here and nowhere else: after this node runs, a file
+    // in `surface` may be one a task wrote, and the coder has to be able to tell
+    // what it can import outright from what this run produced.
+    return { surface, projectFiles: Object.keys(surface), log };
   } catch (error) {
     return failed(state, log, error instanceof Error ? error.message : String(error));
   }

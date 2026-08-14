@@ -69,6 +69,7 @@ function stateFor(runId: string, outputDir: string, tasks: Task[]): AgentState {
     spec: "One screen listing the collection, with a filter over it.",
     outputDir,
     surface: {},
+    projectFiles: [],
     tasks,
     orderedTaskIds: tasks.map((entry) => entry.id),
     cursor: 0,
@@ -149,6 +150,64 @@ test("carries the signatures of the direct dependencies and no others", async ()
   assert.match(request, /src\/types\.ts/);
   assert.match(request, /interface Item/);
   assert.doesNotMatch(request, /useUnrelated/);
+});
+
+test("carries the project's own surface, as it stands, in the stable prefix", async () => {
+  const runId = "test-generate-project-surface";
+  const outputDir = await workspace(runId);
+  const { client, seen } = stub([{ contents: PANEL }]);
+
+  const state = stateFor(runId, outputDir, [task()]);
+  const result = await generate(
+    {
+      ...state,
+      // The project shipped this file; a task earlier in this run rewrote it,
+      // so what the coder is told is the rewritten version.
+      projectFiles: ["src/graphql/queries.ts"],
+      surface: {
+        "src/graphql/queries.ts": {
+          exports: [{ name: "LIST_ITEMS", signature: "const LIST_ITEMS = gql(…)" }],
+        },
+      },
+    },
+    client,
+  );
+
+  assert.equal(result.errors, undefined);
+  // No task produces a project file, so no dependency edge can ever reach one:
+  // the prefix is the only place these signatures can arrive.
+  const prefix = JSON.stringify(seen[0]?.[1]);
+  assert.match(prefix, /src\/graphql\/queries\.ts/);
+  assert.match(prefix, /LIST_ITEMS/);
+});
+
+test("describes a file once, even when a dependency wrote a project file", async () => {
+  const runId = "test-generate-no-duplicate-surface";
+  const outputDir = await workspace(runId);
+  const { client, seen } = stub([{ contents: PANEL }]);
+
+  const state = stateFor(runId, outputDir, [
+    task({ id: "operations", targetPath: "src/graphql/queries.ts", taskType: "data-layer" }),
+    task({ dependsOn: ["operations"] }),
+  ]);
+  const result = await generate(
+    {
+      ...state,
+      cursor: 1,
+      projectFiles: ["src/graphql/queries.ts"],
+      surface: {
+        "src/graphql/queries.ts": {
+          exports: [{ name: "LIST_ITEMS", signature: "const LIST_ITEMS = gql(…)" }],
+        },
+      },
+    },
+    client,
+  );
+
+  assert.equal(result.errors, undefined);
+  const request = JSON.stringify(seen[0]?.at(-1));
+  assert.doesNotMatch(request, /src\/graphql\/queries\.ts/);
+  assert.match(JSON.stringify(seen[0]?.[1]), /src\/graphql\/queries\.ts/);
 });
 
 test("refuses a target outside the output directory before paying for an answer", async () => {

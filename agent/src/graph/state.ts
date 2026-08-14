@@ -79,6 +79,18 @@ export interface LogEntry {
   detail: string;
 }
 
+/**
+ * The paths the provided project shipped, fixed by `prepare` before anything is
+ * generated.
+ *
+ * It is a separate field rather than a snapshot of `surface` because the two
+ * answer different questions: `surface` says what a file exports *now*, and this
+ * says which files the coder may import without a task having produced them.
+ * A task that rewrites one of these paths updates `surface`; the path stays on
+ * this list, so what the coder is told about it is the rewritten version.
+ */
+type ProjectFiles = string[];
+
 /** A field that keeps the last value a node returned, with a starting value. */
 function overwrite<T>(initial: () => T) {
   return Annotation<T>({ reducer: (_previous, next) => next, default: initial });
@@ -109,6 +121,7 @@ export const AgentStateAnnotation = Annotation.Root({
   spec: Annotation<string>,
   outputDir: Annotation<string>,
   surface: overwrite<SurfaceManifest>(() => ({})),
+  projectFiles: overwrite<ProjectFiles>(() => []),
   tasks: overwrite<Task[]>(() => []),
   orderedTaskIds: overwrite<string[]>(() => []),
   cursor: overwrite<number>(() => 0),
