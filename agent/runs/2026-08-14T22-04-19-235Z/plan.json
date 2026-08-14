@@ -1,0 +1,273 @@
+[
+  {
+    "id": "record-types",
+    "description": "Defines the VinylRecord domain type (id, title, artist, year, genre, mobile/tablet/desktop sleeve image URLs) and a mapper that converts the API's Car shape from src/types.ts into a VinylRecord (make→artist, model→title, color→genre).",
+    "targetPath": "src/records/types.ts",
+    "taskType": "data-layer",
+    "dependsOn": [],
+    "acceptance": [
+      "Exports a VinylRecord interface with id, title, artist, year, genre and the three sleeve image sources",
+      "Exports a mapper from the existing Car interface in src/types.ts to VinylRecord",
+      "Contains no React code and issues no queries"
+    ]
+  },
+  {
+    "id": "use-records",
+    "description": "Reusable data-access hooks around the existing GraphQL operations: useRecords() runs GET_CARS and useRecord(id) runs GET_CAR, each returning mapped VinylRecord data plus loading and error state.",
+    "targetPath": "src/hooks/useRecords.ts",
+    "taskType": "data-layer",
+    "dependsOn": [
+      "record-types"
+    ],
+    "acceptance": [
+      "Reuses GET_CARS and GET_CAR from src/graphql/queries.ts rather than declaring new operations",
+      "useRecords returns { records, loading, error } with records mapped to VinylRecord",
+      "useRecord(id) fetches a single record on its own via GET_CAR and returns { record, loading, error }",
+      "Renders no markup; it is the only place components obtain record data from"
+    ]
+  },
+  {
+    "id": "use-sleeve-image",
+    "description": "Hook that tracks viewport width and returns the correct sleeve image source for a record: mobile at ≤640px, tablet at 641–1023px, desktop at ≥1024px, updating when the viewport is resized.",
+    "targetPath": "src/hooks/useSleeveImage.ts",
+    "taskType": "hook",
+    "dependsOn": [
+      "record-types"
+    ],
+    "acceptance": [
+      "Returns the mobile source when viewport width is 640px or narrower",
+      "Returns the tablet source when viewport width is between 641px and 1023px",
+      "Returns the desktop source when viewport width is 1024px or wider",
+      "Subscribes to viewport resize and cleans up its listener on unmount"
+    ]
+  },
+  {
+    "id": "record-filters",
+    "description": "Pure helpers for narrowing and ordering a VinylRecord list: filter by artist substring as the user types, filter by a single decade, list the decades present in a collection, and sort by release year or title. Exports the SortKey type.",
+    "targetPath": "src/records/filters.ts",
+    "taskType": "data-layer",
+    "dependsOn": [
+      "record-types"
+    ],
+    "acceptance": [
+      "Artist filter matches case-insensitively on partial input and returns all records for empty input",
+      "Decade filter keeps only records whose year falls inside the chosen decade",
+      "Exports a helper listing the decades present in a given record list",
+      "Exports sorting by release year and by title, and a SortKey union type",
+      "Functions are pure and do not mutate their input array"
+    ]
+  },
+  {
+    "id": "record-card",
+    "description": "Card component that presents one VinylRecord — title, artist, release year, genre and sleeve artwork — using the project's existing component library, sized for arm's-length legibility.",
+    "targetPath": "src/components/RecordCard.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "record-types",
+      "use-sleeve-image"
+    ],
+    "acceptance": [
+      "Renders title, artist, release year and genre as readable text",
+      "Renders the sleeve image source chosen by useSleeveImage",
+      "Built from the component library the project already depends on",
+      "Issues no GraphQL query itself; receives its record via props",
+      "Invokes an onSelect prop with the record id when the card is activated"
+    ]
+  },
+  {
+    "id": "record-grid",
+    "description": "Presentational grid that maps an array of VinylRecords to RecordCard components and shows an explicit empty-result message when the array is empty.",
+    "targetPath": "src/components/RecordGrid.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "record-card",
+      "record-types"
+    ],
+    "acceptance": [
+      "Renders one RecordCard per record in the order given",
+      "Shows a message when the given list is empty",
+      "Forwards record selection up via a callback prop",
+      "Issues no GraphQL query itself"
+    ]
+  },
+  {
+    "id": "artist-filter",
+    "description": "Controlled text input for filtering the collection by artist, with a visible label, calling back on every keystroke.",
+    "targetPath": "src/components/ArtistFilter.tsx",
+    "taskType": "component",
+    "dependsOn": [],
+    "acceptance": [
+      "Renders a labelled text input associated with its label for accessible querying in tests",
+      "Calls its onChange prop with the current text on each keystroke",
+      "Value is controlled by props, holding no collection state of its own"
+    ]
+  },
+  {
+    "id": "decade-filter",
+    "description": "Controlled selector letting the assistant restrict the collection to one decade, with an option meaning all decades, built from a list of decades passed in as props.",
+    "targetPath": "src/components/DecadeFilter.tsx",
+    "taskType": "component",
+    "dependsOn": [],
+    "acceptance": [
+      "Renders a labelled control listing each supplied decade plus an 'all decades' option",
+      "Calls its onChange prop with the selected decade, or the all-decades value",
+      "Value is controlled by props"
+    ]
+  },
+  {
+    "id": "sort-control",
+    "description": "Controlled selector for ordering the visible collection by release year or by title.",
+    "targetPath": "src/components/SortControl.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "record-filters"
+    ],
+    "acceptance": [
+      "Offers ordering by release year and by title",
+      "Calls its onChange prop with the chosen SortKey",
+      "Value is controlled by props and typed with SortKey from the filters module"
+    ]
+  },
+  {
+    "id": "collection-page",
+    "description": "Collection screen: loads all records through useRecords, holds artist text, decade and sort state, applies the filter and sort helpers together, and renders the filter controls plus the record grid, with loading and error messages instead of an empty collection.",
+    "targetPath": "src/pages/CollectionPage.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "use-records",
+      "record-filters",
+      "record-grid",
+      "artist-filter",
+      "decade-filter",
+      "sort-control",
+      "record-types"
+    ],
+    "acceptance": [
+      "Shows a loading indicator while the collection query is in flight",
+      "Shows a plain error message when the query fails, and does not render an empty grid in that case",
+      "Renders every returned record once data arrives",
+      "Artist filter, decade filter and sort are applied together to the rendered list",
+      "Derives the decade options from the loaded collection",
+      "Calls its onSelectRecord prop with the id of the record the user opens",
+      "Talks to the API only through useRecords"
+    ]
+  },
+  {
+    "id": "record-detail-page",
+    "description": "Detail screen for a single record: fetches it on its own via useRecord, shows title, artist, year, genre and a large sleeve image, with loading and error states and a control to return to the full collection.",
+    "targetPath": "src/pages/RecordDetailPage.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "use-records",
+      "use-sleeve-image",
+      "record-types"
+    ],
+    "acceptance": [
+      "Fetches the record by id with useRecord rather than receiving it from the list",
+      "Shows loading and error states plainly",
+      "Displays title, artist, release year, genre and the viewport-appropriate sleeve image at a larger size",
+      "Renders a back control that invokes an onBack prop"
+    ]
+  },
+  {
+    "id": "record-browser",
+    "description": "Container that owns the selected-record state and swaps between the collection screen and the detail screen without a page reload.",
+    "targetPath": "src/RecordBrowser.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "collection-page",
+      "record-detail-page"
+    ],
+    "acceptance": [
+      "Renders CollectionPage when no record is selected",
+      "Renders RecordDetailPage for the selected id when a record is opened",
+      "Returning from the detail view restores the collection with no page reload",
+      "Contains no data fetching of its own"
+    ]
+  },
+  {
+    "id": "app-wiring",
+    "description": "Application entry component: wraps the record browser in the Apollo provider using the existing client.",
+    "targetPath": "src/App.tsx",
+    "taskType": "wiring",
+    "dependsOn": [
+      "record-browser"
+    ],
+    "acceptance": [
+      "Provides the existing client from src/graphql/client.ts via ApolloProvider",
+      "Renders RecordBrowser as the only child",
+      "Contains no presentation markup or query logic of its own"
+    ]
+  },
+  {
+    "id": "test-collection-renders",
+    "description": "Test that the collection screen renders every record once data arrives from the mock API, after first showing a loading state.",
+    "targetPath": "src/__tests__/collectionRenders.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "collection-page"
+    ],
+    "acceptance": [
+      "Runs against the project's existing MSW mock server, never a live network",
+      "Asserts a loading indicator appears before data resolves",
+      "Asserts each seeded record's title and artist is rendered once the query resolves"
+    ]
+  },
+  {
+    "id": "test-artist-filter",
+    "description": "Test that typing into the artist filter narrows the rendered collection to matching records.",
+    "targetPath": "src/__tests__/artistFilter.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "collection-page"
+    ],
+    "acceptance": [
+      "Runs against the existing mock server",
+      "Types a partial artist name into the artist input after data loads",
+      "Asserts records by that artist remain visible and non-matching records are gone"
+    ]
+  },
+  {
+    "id": "test-decade-filter",
+    "description": "Test that selecting a decade narrows the rendered collection to records released in that decade.",
+    "targetPath": "src/__tests__/decadeFilter.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "collection-page"
+    ],
+    "acceptance": [
+      "Runs against the existing mock server",
+      "Selects a single decade after data loads",
+      "Asserts only records with a year inside that decade remain rendered"
+    ]
+  },
+  {
+    "id": "test-combined-filters",
+    "description": "Test that an artist filter and a decade filter applied together narrow the collection to records matching both.",
+    "targetPath": "src/__tests__/combinedFilters.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "collection-page"
+    ],
+    "acceptance": [
+      "Runs against the existing mock server",
+      "Applies an artist filter and a decade filter in the same render",
+      "Asserts only records satisfying both criteria are shown, including that a record matching just one is excluded"
+    ]
+  },
+  {
+    "id": "test-sorting",
+    "description": "Test that changing the sort control reorders the rendered records, by release year and by title.",
+    "targetPath": "src/__tests__/sorting.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "collection-page"
+    ],
+    "acceptance": [
+      "Runs against the existing mock server",
+      "Asserts the rendered order of records changes when sorting by release year",
+      "Asserts the rendered order of records changes when sorting by title",
+      "Reads order from the rendered DOM rather than from the helper functions"
+    ]
+  }
+]

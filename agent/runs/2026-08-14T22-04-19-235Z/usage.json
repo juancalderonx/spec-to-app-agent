@@ -1,0 +1,240 @@
+{
+  "totals": {
+    "inputTokens": 31331,
+    "cachedReadTokens": 85878,
+    "cacheWriteTokens": 4771,
+    "outputTokens": 69361,
+    "costUsd": 1.9439557499999998
+  },
+  "entries": [
+    {
+      "node": "plan",
+      "role": "planner",
+      "model": "claude-opus-5",
+      "inputTokens": 3137,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 5983,
+      "costUsd": 0.16526
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 484,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 4771,
+      "outputTokens": 567,
+      "costUsd": 0.04641375,
+      "task": "artist-filter"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 494,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2073,
+      "costUsd": 0.0566805,
+      "task": "decade-filter"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 506,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 811,
+      "costUsd": 0.0251905,
+      "task": "record-types"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 879,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1580,
+      "costUsd": 0.0462805,
+      "task": "record-filters"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 807,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1595,
+      "costUsd": 0.0462955,
+      "task": "sort-control"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 895,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2502,
+      "costUsd": 0.0694105,
+      "task": "use-records"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 869,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1879,
+      "costUsd": 0.0537055,
+      "task": "use-sleeve-image"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1321,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2920,
+      "costUsd": 0.0819905,
+      "task": "record-card"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1797,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2865,
+      "costUsd": 0.0829955,
+      "task": "record-detail-page"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1012,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 699,
+      "costUsd": 0.0249205,
+      "task": "record-grid"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 2848,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2498,
+      "costUsd": 0.0790755,
+      "task": "collection-page"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 833,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 619,
+      "costUsd": 0.0220255,
+      "task": "record-browser"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 781,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 739,
+      "costUsd": 0.0247655,
+      "task": "app-wiring"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1439,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 3401,
+      "costUsd": 0.0946055,
+      "task": "test-artist-filter"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1886,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 3715,
+      "costUsd": 0.1046905,
+      "task": "test-artist-filter"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1459,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 3656,
+      "costUsd": 0.1010805,
+      "task": "test-collection-renders"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1453,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 9337,
+      "costUsd": 0.2430755,
+      "task": "test-combined-filters"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1432,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 8930,
+      "costUsd": 0.2327955,
+      "task": "test-decade-filter"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1458,
+      "cachedReadTokens": 4771,
+      "cacheWriteTokens": 0,
+      "outputTokens": 12152,
+      "costUsd": 0.3134755,
+      "task": "test-sorting"
+    },
+    {
+      "node": "review",
+      "role": "reviewer",
+      "model": "claude-sonnet-5",
+      "inputTokens": 5541,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 840,
+      "costUsd": 0.029223
+    }
+  ]
+}
