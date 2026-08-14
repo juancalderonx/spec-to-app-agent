@@ -1,0 +1,272 @@
+{
+  "totals": {
+    "inputTokens": 40553,
+    "cachedReadTokens": 97340,
+    "cacheWriteTokens": 4867,
+    "outputTokens": 132841,
+    "costUsd": 3.57265875
+  },
+  "entries": [
+    {
+      "node": "plan",
+      "role": "planner",
+      "model": "claude-opus-5",
+      "inputTokens": 3233,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 4211,
+      "costUsd": 0.12144
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 539,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 4867,
+      "outputTokens": 3410,
+      "costUsd": 0.11836375,
+      "task": "add-car-form"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 486,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 692,
+      "costUsd": 0.0221635,
+      "task": "car-utils"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 465,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 277,
+      "costUsd": 0.0116835,
+      "task": "model-filter"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 475,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1447,
+      "costUsd": 0.0409835,
+      "task": "sort-control"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1307,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 5739,
+      "costUsd": 0.1524435,
+      "task": "test-utils"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 421,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 758,
+      "costUsd": 0.0234885,
+      "task": "types-view"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 573,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2847,
+      "costUsd": 0.0764735,
+      "task": "use-cars"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 617,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1489,
+      "costUsd": 0.0427435,
+      "task": "use-viewport"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 647,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2671,
+      "costUsd": 0.0724435,
+      "task": "car-card"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 619,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 678,
+      "costUsd": 0.0224785,
+      "task": "car-list"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1914,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2954,
+      "costUsd": 0.0858535,
+      "task": "inventory"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 737,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 274,
+      "costUsd": 0.0129685,
+      "task": "app-wiring"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 592,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 351,
+      "costUsd": 0.0141685,
+      "task": "app-wiring"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 674,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 686,
+      "costUsd": 0.0229535,
+      "task": "app-wiring"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1929,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 15239,
+      "costUsd": 0.3930535,
+      "task": "test-add"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1896,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 13356,
+      "costUsd": 0.3458135,
+      "task": "test-filter"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1937,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 10696,
+      "costUsd": 0.2795185,
+      "task": "test-render"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1911,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 16000,
+      "costUsd": 0.4119885,
+      "task": "test-sort"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 1947,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 16000,
+      "costUsd": 0.4121685,
+      "task": "test-sort"
+    },
+    {
+      "node": "review",
+      "role": "reviewer",
+      "model": "claude-sonnet-5",
+      "inputTokens": 4780,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 842,
+      "costUsd": 0.02697
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 3909,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 16000,
+      "costUsd": 0.4219785,
+      "task": "remediation-1-1"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "claude-opus-5",
+      "inputTokens": 3945,
+      "cachedReadTokens": 4867,
+      "cacheWriteTokens": 0,
+      "outputTokens": 16000,
+      "costUsd": 0.4221585,
+      "task": "remediation-1-1"
+    },
+    {
+      "node": "review",
+      "role": "reviewer",
+      "model": "claude-sonnet-5",
+      "inputTokens": 5000,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 224,
+      "costUsd": 0.01836
+    }
+  ]
+}

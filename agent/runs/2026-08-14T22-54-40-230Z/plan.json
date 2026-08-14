@@ -1,0 +1,142 @@
+[
+  {
+    "id": "car-inventory-hook",
+    "description": "Create a reusable inventory data hook that fetches all cars and adds cars through the existing GraphQL API. It must own query/mutation state and update the inventory when a mutation succeeds.",
+    "targetPath": "src/hooks/useCarInventory.ts",
+    "taskType": "hook",
+    "dependsOn": [],
+    "acceptance": [
+      "Uses the existing GET_CARS and ADD_CAR GraphQL operations.",
+      "Exposes inventory data plus fetch loading/error and add loading/error states.",
+      "Adding a vehicle updates the inventory data after the mutation succeeds without requiring a page reload.",
+      "Does not issue GraphQL operations from presentation components."
+    ]
+  },
+  {
+    "id": "car-card",
+    "description": "Build the card presentation for a single vehicle, including responsive image source selection for the specified phone, tablet, and desktop width bands.",
+    "targetPath": "src/components/CarCard.tsx",
+    "taskType": "component",
+    "dependsOn": [],
+    "acceptance": [
+      "Displays the vehicle make, model, year, colour, and photograph using the existing component library.",
+      "Uses the phone image at widths up to 640px, the tablet image from 641px through 1023px, and the desktop image at 1024px and above.",
+      "Uses responsive image markup so unsuitable larger sources are not requested for smaller viewports."
+    ]
+  },
+  {
+    "id": "inventory-controls",
+    "description": "Build the inventory controls for entering a model filter and choosing whether to sort by year or make.",
+    "targetPath": "src/components/InventoryControls.tsx",
+    "taskType": "component",
+    "dependsOn": [],
+    "acceptance": [
+      "Provides a model filter that updates as the user types.",
+      "Provides sort choices for year and make.",
+      "Uses controls from the project's existing component library."
+    ]
+  },
+  {
+    "id": "add-car-form",
+    "description": "Build the add-vehicle form as a presentation component with required-field validation and submission status feedback.",
+    "targetPath": "src/components/AddCarForm.tsx",
+    "taskType": "component",
+    "dependsOn": [],
+    "acceptance": [
+      "Collects make, model, year, and colour and passes them to the supplied submit callback.",
+      "Prevents submission when any required value is empty or the year is missing or invalid.",
+      "Shows submission progress and a plain mutation error when supplied by the inventory page.",
+      "Uses form controls from the project's existing component library."
+    ]
+  },
+  {
+    "id": "inventory-page",
+    "description": "Build the inventory page that coordinates data state, filtering, sorting, responsive card layout, and the add-vehicle form while delegating GraphQL access to the reusable hook.",
+    "targetPath": "src/components/InventoryPage.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "car-inventory-hook",
+      "car-card",
+      "inventory-controls",
+      "add-car-form"
+    ],
+    "acceptance": [
+      "Consumes the reusable inventory hook rather than issuing GraphQL requests directly.",
+      "Shows an in-progress state while the initial inventory request is loading and a plain error message if it fails.",
+      "Filters cars by case-insensitive partial model text and then sorts the filtered result by the selected year or make option.",
+      "Renders every resulting vehicle as a card in a layout that adapts to phone, tablet, and desktop widths.",
+      "Submitting a valid vehicle through the form calls the add operation and allows the returned vehicle to appear in the inventory."
+    ]
+  },
+  {
+    "id": "app-wiring",
+    "description": "Wire the inventory page into the application and provide it with the project's existing GraphQL client.",
+    "targetPath": "src/App.tsx",
+    "taskType": "wiring",
+    "dependsOn": [
+      "inventory-page"
+    ],
+    "acceptance": [
+      "Renders the inventory page as the application screen.",
+      "Provides the existing Apollo client context required by the inventory hook.",
+      "Contains only application wiring, not vehicle presentation or data-access logic."
+    ]
+  },
+  {
+    "id": "inventory-render-test",
+    "description": "Add an automated test proving that inventory loaded from the mock API is rendered after the initial loading state.",
+    "targetPath": "src/__tests__/inventory-renders.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "app-wiring"
+    ],
+    "acceptance": [
+      "Runs through the project's existing mock GraphQL API rather than a live network.",
+      "Confirms a loading indication is shown before the inventory response arrives.",
+      "Confirms returned vehicles render as cards with their make, model, year, colour, and photograph."
+    ]
+  },
+  {
+    "id": "inventory-filter-test",
+    "description": "Add an automated test proving that typing a partial model name filters the inventory displayed from the mock API.",
+    "targetPath": "src/__tests__/inventory-filtering.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "app-wiring"
+    ],
+    "acceptance": [
+      "Runs through the project's existing mock GraphQL API rather than a live network.",
+      "Typing part of a model name narrows the rendered inventory to matching models as the user types.",
+      "Matching is verified without requiring exact casing or a complete model name."
+    ]
+  },
+  {
+    "id": "inventory-sort-test",
+    "description": "Add an automated test proving that year and make sorting reorder the inventory and operate on the currently filtered list.",
+    "targetPath": "src/__tests__/inventory-sorting.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "app-wiring"
+    ],
+    "acceptance": [
+      "Runs through the project's existing mock GraphQL API rather than a live network.",
+      "Selecting year changes the displayed vehicle order by year.",
+      "Selecting make changes the displayed vehicle order by make.",
+      "Sorting while a model filter is active preserves that filter."
+    ]
+  },
+  {
+    "id": "inventory-add-test",
+    "description": "Add an automated test proving that valid vehicle details are submitted through the mock API and the created vehicle appears immediately, while empty submission is rejected.",
+    "targetPath": "src/__tests__/inventory-adding.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "app-wiring"
+    ],
+    "acceptance": [
+      "Runs the add mutation through the project's existing mock GraphQL API rather than a live network.",
+      "Entering make, model, year, and colour and submitting causes the new vehicle to appear in the inventory without reloading the page.",
+      "An empty form does not submit an add mutation."
+    ]
+  }
+]

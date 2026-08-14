@@ -1,0 +1,235 @@
+[
+  {
+    "id": "types-view",
+    "description": "Not needed as separate types; skipped.",
+    "targetPath": "src/types/viewport.ts",
+    "taskType": "data-layer",
+    "dependsOn": [],
+    "acceptance": [
+      "Exports a Viewport union type 'mobile' | 'tablet' | 'desktop'",
+      "Exports the breakpoint boundaries (640 and 1024) as named constants so the hook and any consumer share one definition"
+    ]
+  },
+  {
+    "id": "use-viewport",
+    "description": "Hook that reports which of the three viewport bands the window currently falls into, updating on resize.",
+    "targetPath": "src/hooks/useViewport.ts",
+    "taskType": "hook",
+    "dependsOn": [
+      "types-view"
+    ],
+    "acceptance": [
+      "Returns 'mobile' for widths of 640px or less",
+      "Returns 'tablet' for widths between 641px and 1023px inclusive",
+      "Returns 'desktop' for widths of 1024px or more",
+      "Subscribes to viewport width changes and re-reports when the band changes, cleaning up its listener on unmount"
+    ]
+  },
+  {
+    "id": "use-cars",
+    "description": "Reusable data-access hook wrapping the existing GET_CARS query and ADD_CAR mutation, exposing cars, loading, error and an addCar function that makes the new vehicle appear without a reload.",
+    "targetPath": "src/hooks/useCars.ts",
+    "taskType": "hook",
+    "dependsOn": [],
+    "acceptance": [
+      "Imports GET_CARS and ADD_CAR from src/graphql/queries.ts rather than declaring new documents",
+      "Returns { cars: Car[]; loading: boolean; error?: unknown; addCar }",
+      "Fetches the inventory when first used",
+      "addCar(make, model, year, color) runs the ADD_CAR mutation and updates the cached inventory so the new vehicle is included in the returned cars without a refetch of the page",
+      "Is the only module in the project that issues GraphQL operations for the inventory"
+    ]
+  },
+  {
+    "id": "car-utils",
+    "description": "Pure helpers for narrowing the inventory by model text and ordering it by year or by make, composable so sorting applies to an already filtered list.",
+    "targetPath": "src/utils/carFilters.ts",
+    "taskType": "data-layer",
+    "dependsOn": [],
+    "acceptance": [
+      "Exports filterByModel(cars, query) matching partial, case-insensitive model text and returning all cars for an empty query",
+      "Exports sortCars(cars, key) supporting 'year' and 'make'",
+      "Both functions return new arrays and do not mutate their input",
+      "Composing filter then sort preserves the filter"
+    ]
+  },
+  {
+    "id": "car-card",
+    "description": "Presentational card for one vehicle showing make, model, year, colour and the photograph appropriate to the current viewport band, built with the project's existing component library.",
+    "targetPath": "src/components/CarCard.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "use-viewport"
+    ],
+    "acceptance": [
+      "Takes a single Car as prop and issues no GraphQL query of its own",
+      "Renders make, model, year and colour as text",
+      "Renders the car's mobile image on mobile, tablet image on tablet and desktop image on desktop, chosen via useViewport",
+      "Image has meaningful alt text identifying the vehicle",
+      "Uses the component library the project already depends on rather than a new one"
+    ]
+  },
+  {
+    "id": "car-list",
+    "description": "Responsive grid that renders a CarCard for each vehicle passed to it and shows a plain empty state when the list is empty.",
+    "targetPath": "src/components/CarList.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "car-card"
+    ],
+    "acceptance": [
+      "Takes cars: Car[] as prop and renders one CarCard per vehicle, keyed by id",
+      "Lays cards out in a grid that reflows to fewer columns as the screen narrows",
+      "Issues no GraphQL query of its own",
+      "Renders a short empty-state message when given zero cars"
+    ]
+  },
+  {
+    "id": "model-filter",
+    "description": "Controlled text input for filtering the inventory by model name as the user types.",
+    "targetPath": "src/components/ModelFilter.tsx",
+    "taskType": "component",
+    "dependsOn": [],
+    "acceptance": [
+      "Takes value and onChange props and calls onChange on every keystroke",
+      "Has an accessible label identifying it as a model search",
+      "Holds no inventory state and issues no GraphQL query"
+    ]
+  },
+  {
+    "id": "sort-control",
+    "description": "Control that lets the user choose to sort the inventory by year or by make.",
+    "targetPath": "src/components/SortControl.tsx",
+    "taskType": "component",
+    "dependsOn": [],
+    "acceptance": [
+      "Takes the current sort key and an onChange prop",
+      "Offers exactly the options 'year' and 'make', each with a visible label",
+      "Has an accessible label identifying it as the sort control",
+      "Issues no GraphQL query"
+    ]
+  },
+  {
+    "id": "add-car-form",
+    "description": "Form collecting make, model, year and colour and submitting a new vehicle through the addCar callback it is given.",
+    "targetPath": "src/components/AddCarForm.tsx",
+    "taskType": "component",
+    "dependsOn": [],
+    "acceptance": [
+      "Renders labelled fields for make, model, year and colour plus a submit control",
+      "Calls the onAdd prop with the entered values on submit",
+      "Rejects submission when any required field is empty and surfaces a visible validation message instead of calling onAdd",
+      "Clears the fields after a successful submission",
+      "Issues no GraphQL operation itself; it receives the add callback as a prop"
+    ]
+  },
+  {
+    "id": "inventory",
+    "description": "Container screen that reads inventory through useCars, holds filter and sort state, and composes the filter input, sort control, add form and card list, plus loading and error messaging.",
+    "targetPath": "src/components/Inventory.tsx",
+    "taskType": "component",
+    "dependsOn": [
+      "use-cars",
+      "car-utils",
+      "car-list",
+      "model-filter",
+      "sort-control",
+      "add-car-form"
+    ],
+    "acceptance": [
+      "Shows a visible loading indicator while the inventory request is in flight",
+      "Shows a plain error message, not an empty inventory, when the request fails",
+      "Passes filterByModel then sortCars output to CarList so sorting keeps the filter applied",
+      "Wires AddCarForm's submission to the addCar function from useCars so the new vehicle appears in the list without a reload",
+      "Contains no GraphQL documents of its own"
+    ]
+  },
+  {
+    "id": "app-wiring",
+    "description": "Application entry component wiring the Apollo client provider around the Inventory screen.",
+    "targetPath": "src/App.tsx",
+    "taskType": "wiring",
+    "dependsOn": [
+      "inventory"
+    ],
+    "acceptance": [
+      "Wraps the tree in ApolloProvider using the existing client from src/graphql/client.ts",
+      "Renders the Inventory screen",
+      "Contains no presentation markup for vehicles and no data access of its own"
+    ]
+  },
+  {
+    "id": "test-utils",
+    "description": "Test helper that renders a component inside the Apollo provider used by the app, so tests exercise the project's mock API.",
+    "targetPath": "src/test-utils.tsx",
+    "taskType": "test",
+    "dependsOn": [],
+    "acceptance": [
+      "Exports renderWithProviders(ui) wrapping the ui in ApolloProvider with the project's client",
+      "Sets up a fresh Apollo cache per render so tests do not leak data between each other",
+      "Re-exports Testing Library queries and userEvent for convenience"
+    ]
+  },
+  {
+    "id": "test-render",
+    "description": "Test that the inventory renders once data arrives from the mock API, and that loading and error states are shown appropriately.",
+    "targetPath": "src/components/__tests__/Inventory.render.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "inventory",
+      "test-utils"
+    ],
+    "acceptance": [
+      "Renders Inventory via renderWithProviders and asserts a loading indicator appears first",
+      "Asserts every seeded vehicle's make and model is on screen after the query resolves",
+      "Asserts an error message, and no empty inventory, is shown when the mock API is made to fail for the cars query",
+      "Runs against the existing MSW mock API, never a live network"
+    ]
+  },
+  {
+    "id": "test-filter",
+    "description": "Test that typing part of a model name narrows the rendered inventory.",
+    "targetPath": "src/components/__tests__/Inventory.filter.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "inventory",
+      "test-utils"
+    ],
+    "acceptance": [
+      "Waits for the seeded inventory to render, then types partial model text into the model filter",
+      "Asserts matching vehicles remain on screen and non-matching ones are removed",
+      "Asserts clearing the input restores the full list",
+      "Runs against the existing MSW mock API"
+    ]
+  },
+  {
+    "id": "test-sort",
+    "description": "Test that choosing a sort option reorders the inventory and that sorting a filtered list keeps the filter applied.",
+    "targetPath": "src/components/__tests__/Inventory.sort.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "inventory",
+      "test-utils"
+    ],
+    "acceptance": [
+      "Asserts card order changes to ascending year when sorting by year",
+      "Asserts card order changes when sorting by make",
+      "Filters by model first, then sorts, and asserts the filtered subset stays filtered in the new order",
+      "Runs against the existing MSW mock API"
+    ]
+  },
+  {
+    "id": "test-add",
+    "description": "Test that submitting the add form creates a vehicle through the mutation and shows it in the list without a reload, and that empty submissions are rejected.",
+    "targetPath": "src/components/__tests__/AddCar.test.tsx",
+    "taskType": "test",
+    "dependsOn": [
+      "inventory",
+      "test-utils"
+    ],
+    "acceptance": [
+      "Fills make, model, year and colour and submits, then asserts the new vehicle appears in the inventory list without re-rendering the app",
+      "Asserts submitting with empty fields shows a validation message and adds nothing to the list",
+      "Runs the ADD_CAR mutation against the existing MSW mock API"
+    ]
+  }
+]

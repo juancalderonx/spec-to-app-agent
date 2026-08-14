@@ -1,0 +1,250 @@
+{
+  "totals": {
+    "inputTokens": 85662,
+    "cachedReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "outputTokens": 38601,
+    "costUsd": 1.570143
+  },
+  "entries": [
+    {
+      "node": "plan",
+      "role": "planner",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 1998,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 3129,
+      "costUsd": 0.10386
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 3656,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2010,
+      "costUsd": 0.07858,
+      "task": "add-car-form"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 3672,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 760,
+      "costUsd": 0.04116,
+      "task": "car-card"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 3626,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 882,
+      "costUsd": 0.04459,
+      "task": "car-inventory-hook"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 3621,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 698,
+      "costUsd": 0.039045,
+      "task": "inventory-controls"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 3853,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 505,
+      "costUsd": 0.034415,
+      "task": "inventory-controls"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4096,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2990,
+      "costUsd": 0.11018,
+      "task": "inventory-page"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4457,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 979,
+      "costUsd": 0.051655,
+      "task": "inventory-page"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 3732,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 284,
+      "costUsd": 0.02718,
+      "task": "app-wiring"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4215,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 3375,
+      "costUsd": 0.122325,
+      "task": "inventory-add-test"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4373,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1214,
+      "costUsd": 0.058285,
+      "task": "inventory-add-test"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4371,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1593,
+      "costUsd": 0.069645,
+      "task": "inventory-add-test"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4200,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1539,
+      "costUsd": 0.06717,
+      "task": "inventory-filter-test"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4281,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1557,
+      "costUsd": 0.068115,
+      "task": "inventory-filter-test"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4200,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 2523,
+      "costUsd": 0.09669,
+      "task": "inventory-render-test"
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4200,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 4074,
+      "costUsd": 0.14322,
+      "task": "inventory-sort-test"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4718,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 3153,
+      "costUsd": 0.11818,
+      "task": "inventory-sort-test"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4856,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1976,
+      "costUsd": 0.08356,
+      "task": "inventory-sort-test"
+    },
+    {
+      "node": "review",
+      "role": "reviewer",
+      "model": "gpt-5.6-terra",
+      "inputTokens": 2126,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 145,
+      "costUsd": 0.005992
+    },
+    {
+      "node": "generate",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4777,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 4042,
+      "costUsd": 0.145145,
+      "task": "remediation-1-1"
+    },
+    {
+      "node": "repair",
+      "role": "coder",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 4531,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 1123,
+      "costUsd": 0.056345,
+      "task": "remediation-1-1"
+    },
+    {
+      "node": "review",
+      "role": "reviewer",
+      "model": "gpt-5.6-terra",
+      "inputTokens": 2103,
+      "cachedReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 50,
+      "costUsd": 0.004806
+    }
+  ]
+}
