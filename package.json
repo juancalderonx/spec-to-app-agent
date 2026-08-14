@@ -1,0 +1,23 @@
+{
+  "name": "spec-to-app-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent that turns a natural-language specification into a working React + TypeScript application.",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node agent/src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "graph:mermaid": "node --input-type=module -e \"const { buildGraph } = await import('./agent/src/graph/index.ts'); console.log((await buildGraph().getGraphAsync()).drawMermaid())\""
+  },
+  "dependencies": {
+    "@langchain/core": "1.2.7",
+    "@langchain/langgraph": "1.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "typescript": "5.9.3"
+  }
+}
