@@ -96,6 +96,11 @@ export interface View {
   /** Lines scrolled back from the newest. Zero follows the tail. */
   scrollback: number;
   frame: number;
+  /**
+   * How long the log has been silent. A run waits minutes on one model call,
+   * and a pane that only shows lines cannot say whether it is waiting or hung.
+   */
+  idleMs: number;
 }
 
 /** One step per planned task, in execution order, with what it spent and how long it took. */
@@ -257,6 +262,37 @@ function stepLines(view: View, columns: number, rows: number, colour: boolean): 
   return lines;
 }
 
+/**
+ * The line pinned to the bottom of the log pane: what the run is waiting on,
+ * and for how long.
+ *
+ * It is a line of its own rather than a note appended to the last log line,
+ * because the log is the run's record and this is not part of it — it is the
+ * absence of a record, which is exactly what a reader watching a silent
+ * terminal needs told.
+ */
+export function waitingLine(view: View, colour: boolean): string {
+  if (view.status !== "running") {
+    const finished = finishedCount(view.steps);
+    const text =
+      view.status === "stopped"
+        ? `■ stopped · ${finished}/${view.steps.length} · $${view.costUsd.toFixed(4)}`
+        : `✓ finished · ${finished}/${view.steps.length} · $${view.costUsd.toFixed(4)}`;
+    return paint(` ${text}`, view.status === "stopped" ? AMBER : GREEN, colour);
+  }
+  const running = view.steps.find((step) => step.status === "running");
+  const last = view.logs.at(-1);
+  const subject =
+    running !== undefined
+      ? running.id
+      : last === undefined
+        ? "the first line"
+        : `[${last.node}]`;
+  const frame = FRAMES[view.frame % FRAMES.length];
+  const text = ` ${frame} waiting on ${subject} · ${duration(view.idleMs)}`;
+  return paint(text, GREY, colour);
+}
+
 const NODE_TINT: Record<string, string> = {
   prepare: BLUE,
   plan: VIOLET,
@@ -346,11 +382,22 @@ export function renderDashboard(view: View, size: Size, colour: boolean): string
           colour,
         );
 
-  const logRows = stacked ? Math.max(height - overviewRows, 3) : height;
+  const logRows = stacked ? Math.max(height - overviewRows, 5) : height;
   const laid = layoutLogs(view.logs, right, colour);
-  const visible = Math.max(logRows - 2, 1);
+  // Two rows of the pane belong to the waiting line and the blank above it, and
+  // the log window is sized to what is left. Reserved rather than drawn on top,
+  // so a pane full of lines never has the two touch.
+  const visible = Math.max(logRows - 4, 1);
   const end = Math.max(laid.length - view.scrollback, visible);
-  const logs = pane("LOGS", laid.slice(Math.max(end - visible, 0), end), right, logRows, colour);
+  const window = laid.slice(Math.max(end - visible, 0), end);
+  const filler = Array.from({ length: Math.max(visible - window.length, 0) }, () => "");
+  const logs = pane(
+    "LOGS",
+    [...window, ...filler, "", waitingLine(view, colour)],
+    right,
+    logRows,
+    colour,
+  );
 
   const lines: string[] = [];
   if (stacked) {

@@ -8,6 +8,7 @@ import {
   readSteps,
   renderDashboard,
   trackTimings,
+  waitingLine,
   type LogLine,
   type Step,
   type View,
@@ -83,6 +84,7 @@ function viewFor(overrides: Partial<View> = {}): View {
     costUsd: 0.75,
     scrollback: 0,
     frame: 0,
+    idleMs: 12_000,
     ...overrides,
   };
 }
@@ -214,7 +216,50 @@ test("shows the newest lines by default and older ones once scrolled", () => {
   const scrolled = renderDashboard(viewFor({ logs: many, scrollback: 40 }), size, false);
 
   assert.match(tail, /line-59/);
-  assert.doesNotMatch(tail, /line-0\b/);
-  assert.match(scrolled, /line-0\b/);
+  assert.doesNotMatch(tail, /line-1\b/);
+  assert.match(scrolled, /line-1\b/);
   assert.doesNotMatch(scrolled, /line-59/);
+});
+
+test("says what the run is waiting on while the log is silent", () => {
+  const line = waitingLine(viewFor(), false);
+
+  assert.match(line, /waiting on second · 12s/);
+});
+
+test("names the last node when no task is in flight yet", () => {
+  const steps = readSteps(stateFor({ orderedTaskIds: [], status: {} }), [], {}, 0);
+
+  assert.match(waitingLine(viewFor({ steps }), false), /waiting on \[generate\]/);
+  assert.match(waitingLine(viewFor({ steps, logs: [] }), false), /waiting on the first line/);
+});
+
+test("turns while it waits, and stops turning once the run is over", () => {
+  const first = waitingLine(viewFor({ frame: 0 }), false);
+  const second = waitingLine(viewFor({ frame: 1 }), false);
+
+  assert.notEqual(first, second);
+  assert.match(waitingLine(viewFor({ status: "finished" }), false), /✓ finished · 1\/3/);
+  assert.match(waitingLine(viewFor({ status: "stopped" }), false), /■ stopped · 1\/3/);
+});
+
+test("keeps a blank row between the last log line and the waiting line, however full the pane is", () => {
+  const many = Array.from({ length: 200 }, (_, index) => ({
+    time: "06:22:08",
+    node: "generate",
+    text: `line-${index}`,
+  }));
+
+  for (const size of [
+    { columns: 120, rows: 40 },
+    { columns: 80, rows: 24 },
+    { columns: 60, rows: 16 },
+  ]) {
+    const frame = renderDashboard(viewFor({ logs: many }), size, false).split("\n");
+    const waiting = frame.findIndex((line) => line.includes("waiting on"));
+
+    assert.notEqual(waiting, -1, `${size.columns}x${size.rows}: no waiting line`);
+    assert.doesNotMatch(frame[waiting - 1] ?? "", /line-\d/, `${size.columns}x${size.rows}: they touch`);
+    assert.match(frame[waiting - 2] ?? "", /line-\d/, `${size.columns}x${size.rows}: a gap of more than one`);
+  }
 });

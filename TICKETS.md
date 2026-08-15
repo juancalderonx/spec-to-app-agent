@@ -973,6 +973,14 @@ rather than hidden.
   that carries the recursion limit, so the call in flight is cancelled rather
   than paid for and discarded.
 
+  The bottom two rows of the log pane are **reserved**, not drawn over: a blank
+  row and, under it, a line saying what the run is waiting on and for how long,
+  turning while it waits. A run spends minutes inside one model call, and a pane
+  that can only show lines cannot tell a wait from a hang. Reserving the rows is
+  what guarantees the two never touch however full the pane gets, and the line
+  becomes the run's verdict — finished or stopped, with the count and the spend
+  — once there is nothing left to wait for.
+
   The alternate buffer is the whole reason a full-screen view is acceptable
   here. The shell's scrollback is untouched while the run draws, and on the way
   out the screen is handed back and **the entire log is replayed onto the normal
@@ -1000,6 +1008,8 @@ rather than hidden.
         the live screen still leaves its whole log in the shell afterwards
   - [ ] The frame fits the terminal it is given — every row inside the width,
         every frame inside the height — at several sizes and in both palettes
+  - [ ] The waiting line is separated from the last log line by a blank row at
+        every size, including a pane with more lines than it can hold
   - [ ] `q` reaches the graph as an abort, and the run reports that it was
         stopped rather than that it finished
   - [ ] A cancelled menu ends the process without calling a provider

@@ -107,6 +107,9 @@ function stamp(at: Date): string {
 export function createLive(options: LiveOptions): Live {
   const startedAt = Date.now();
   const logs: LogLine[] = [];
+  // When the log last said anything. The waiting line counts from here, so a
+  // long model call reads as a wait rather than as a stall.
+  let lastLogAt = startedAt;
   let steps: readonly Step[] = [];
   let timings: Timings = {};
   let costUsd = 0;
@@ -130,6 +133,7 @@ export function createLive(options: LiveOptions): Live {
       costUsd,
       scrollback,
       frame,
+      idleMs: Date.now() - lastLogAt,
     };
     frame += 1;
     options.output.write(`${HOME}${renderDashboard(view, { columns, rows }, true)}${CLEAR_BELOW}`);
@@ -166,6 +170,9 @@ export function createLive(options: LiveOptions): Live {
       const now = Date.now();
       for (const entry of entries) {
         logs.push({ time: stamp(new Date(now)), node: entry.node, text: `${entry.event}: ${entry.detail}` });
+      }
+      if (entries.length > 0) {
+        lastLogAt = now;
       }
       timings = trackTimings(timings, state, inFlight, now);
       steps = readSteps(state, inFlight, timings, now);
