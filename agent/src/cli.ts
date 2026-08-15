@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { GraphRecursionError } from "@langchain/langgraph";
+import { launch, needsLauncher } from "./cli/launcher.ts";
+import { createLive } from "./cli/live.ts";
+import { inFlightIds, progressLine } from "./cli/progress.ts";
 import { MAX_PLAN_TASKS, RECURSION_LIMIT, buildGraph } from "./graph/index.ts";
 import type { AgentState } from "./graph/state.ts";
 import { openGaps, runVerdict } from "./graph/verdict.ts";
@@ -25,7 +28,9 @@ Options:
   --model <id>       Model id, overriding the default for every role.
   --cache <mode>     Prompt cache on the stable prefix: ${CACHE_MODES.join(" | ")}.
                      Off prices a run that caches nothing. Defaults to on.
-  --help             Print this message.`;
+  --help             Print this message.
+
+Run with no --spec on a terminal to pick one from a menu instead.`;
 
 /** Narrows a flag's value to one of its allowed members, or explains why not. */
 function member<T extends string>(
@@ -59,14 +64,35 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  if (values.spec === undefined || values.output === undefined) {
+  // Fixed at startup rather than generated mid-graph, so a replay writes to the
+  // same paths as the run it replays. It also dates the directory the launcher
+  // offers, which is why it is read before anything is asked.
+  const startedAt = new Date();
+  const runId = startedAt.toISOString().replace(/[:.]/g, "-");
+
+  // A terminal with a reader in front of it and no specification named is the
+  // one case worth asking in. Every other invocation — a flag given, a pipe, a
+  // job with no terminal — goes straight through, so the documented command
+  // line remains the whole interface.
+  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+  const asking = needsLauncher(values, interactive);
+  const chosen = asking ? await launch(process.stdin, process.stdout, startedAt) : null;
+  // Quitting a menu is an answer: the run ends here, before a credential is
+  // even looked for.
+  if (asking && chosen === null) {
+    return 0;
+  }
+
+  const specPath = chosen?.spec ?? values.spec;
+  const outputPath = chosen?.output ?? values.output;
+  if (specPath === undefined || outputPath === undefined) {
     console.error("Both --spec and --output are required.\n");
     console.error(USAGE);
     return 1;
   }
 
   const provider = member(
-    values.provider ?? process.env.LLM_PROVIDER ?? DEFAULT_PROVIDER,
+    chosen?.provider ?? values.provider ?? process.env.LLM_PROVIDER ?? DEFAULT_PROVIDER,
     PROVIDERS,
     "provider",
   );
@@ -76,15 +102,18 @@ async function main(): Promise<number> {
   // Fails here rather than mid-run: a missing credential should cost nothing.
   requireApiKey(provider);
 
-  // Fixed at startup rather than generated mid-graph, so a replay writes to the
-  // same paths as the run it replays.
-  const runId = new Date().toISOString().replace(/[:.]/g, "-");
-  const spec = await readFile(resolve(values.spec), "utf8");
-  const outputDir = resolve(values.output);
+  const spec = await readFile(resolve(specPath), "utf8");
+  const outputDir = resolve(outputPath);
 
-  console.log(
-    `run ${runId} · provider ${provider} · model ${model} · cache ${cache}`,
-  );
+  const header = `run ${runId} · provider ${provider} · model ${model} · cache ${cache}`;
+  if (!interactive) {
+    console.log(header);
+  }
+
+  // The reader's way out. `stream` takes the signal through `RunnableConfig`,
+  // so `q` cancels the call in flight instead of leaving a request paid for and
+  // unread, and the loop below ends at the superstep it was on.
+  const stopping = new AbortController();
 
   // Streamed rather than invoked: a run takes minutes, and `invoke` returns
   // only once the whole graph is done, so every line would arrive at the end at
@@ -99,19 +128,68 @@ async function main(): Promise<number> {
     { runId, spec, outputDir },
     // The library's default of 25 supersteps is below what a real plan needs
     // once each task costs a visit of its own.
-    { recursionLimit: RECURSION_LIMIT, streamMode: "values" },
+    { recursionLimit: RECURSION_LIMIT, streamMode: "values", signal: stopping.signal },
   );
 
   // `log` accumulates across the run, so each state carries the lines already
   // printed. The cursor is what keeps a line from being printed twice.
   let printed = 0;
   let final: AgentState | undefined;
-  for await (const state of states) {
-    for (const entry of state.log.slice(printed)) {
-      console.log(`[${entry.node}] ${entry.event}: ${entry.detail}`);
+
+  const elapsed = (): number => Date.now() - startedAt.getTime();
+
+  // On a terminal the run gets a screen: what it is doing on the left, the log
+  // on the right. Anywhere else — a pipe, a file, a job with no terminal — the
+  // same lines are printed one after another with no escape sequence in them,
+  // because a file has no panes to draw into.
+  const live = interactive
+    ? createLive({
+        facts: { runId, provider, model, cache, startedAt },
+        input: process.stdin,
+        output: process.stdout,
+        onStop: () => stopping.abort(),
+      })
+    : undefined;
+
+  try {
+    for await (const state of states) {
+      const entries = state.log.slice(printed);
+      printed = state.log.length;
+      final = state;
+
+      if (live === undefined) {
+        for (const entry of entries) {
+          console.log(`[${entry.node}] ${entry.event}: ${entry.detail}`);
+        }
+        const progress = progressLine(state, elapsed(), false);
+        if (progress !== null) {
+          console.log(progress);
+        }
+      } else {
+        live.update(state, entries, inFlightIds(state));
+      }
     }
-    printed = state.log.length;
-    final = state;
+  } catch (error) {
+    // An abort is the reader's decision, not a failure: everything the run
+    // produced up to here is on disk and in the log replayed below.
+    if (!stopping.signal.aborted) {
+      throw error;
+    }
+  }
+
+  // The screen is given back before anything else is printed, and the log is
+  // replayed onto the normal buffer: the pretty view is for watching, and the
+  // lines are what the reader keeps.
+  if (live !== undefined) {
+    const replay = live.finish(stopping.signal.aborted ? "stopped" : "finished");
+    console.log(header);
+    for (const line of replay) {
+      console.log(line);
+    }
+  }
+
+  if (stopping.signal.aborted) {
+    console.error(`stopped by the reader after ${Math.round(elapsed() / 1000)}s`);
   }
 
   if (final === undefined) {

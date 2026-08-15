@@ -924,32 +924,243 @@ rather than hidden.
 
 ---
 
-### T-22 — Make a run legible while it is running (optional)
+### T-22 — Make a run legible before and while it is running
 
 - **Why:** A run takes around twenty-five minutes and prints a flat stream of
   `[node] event: detail` lines. Nothing says which task of how many is in
   flight, how long it has taken, or what it has cost so far — all three are
-  already in state and none of them are shown. This is also what makes a short
-  terminal recording usable in the README, which is the only way a reader sees
-  the agent work without spending their own credit. Addresses Documentation.
+  already in state and none of them are shown, and between two model calls the
+  terminal sits still for minutes with no sign the process is alive. Starting a
+  run is no better: the two required flags have to be typed from memory or read
+  out of `--help`, and the specifications on offer are sitting in `specs/`. This
+  is also what makes a short terminal recording usable in the README, which is
+  the only way a reader sees the agent work without spending their own credit.
+  Addresses Documentation.
 - **Depends on:** T-18
-- **Files:** `agent/src/cli.ts`, `agent/src/cli/progress.ts` (new),
-  `agent/src/cli/__tests__/progress.test.ts` (new)
-- **Scope:** Add a progress line carrying task position (`7/14`), the task in
-  flight, elapsed time, and accumulated cost from the ledger already in state.
-  Colour with raw ANSI escapes and **only when `process.stdout.isTTY`** — piped
-  to a file the output stays plain, which is the constraint that keeps this from
-  being decoration. **Zero new dependencies:** no `chalk`, no `ora`, no spinner
-  library. Does **not** take over the screen, redraw, or hide the log lines —
-  the streamed log is the run's evidence and stays.
+- **Files:** `agent/src/cli.ts`, `agent/src/cli/ansi.ts` (new),
+  `agent/src/cli/menu.ts` (new), `agent/src/cli/launcher.ts` (new),
+  `agent/src/cli/dashboard.ts` (new), `agent/src/cli/live.ts` (new),
+  `agent/src/cli/progress.ts` (new), their tests under
+  `agent/src/cli/__tests__/`, `.gitignore`
+- **Scope:** Three pieces over one shared set of terminal primitives
+  (`ansi.ts`: the palette, the widths, the box characters), one commit.
+
+  **The progress line.** Task position (`7/14`), the tasks in flight, elapsed
+  time and accumulated cost, all read from state and the ledger already there.
+  This is what a run with no terminal prints, one line per superstep.
+
+  **The launcher.** Started on a terminal with no `--spec`, the CLI draws a
+  welcome box carrying the version, the Node it is running on and whether a
+  `.env` was found, then one screen holding both questions at once — a
+  specification from `specs/`, described by its own first heading, and a
+  provider from the list the factory already exports. Arrow keys move inside the
+  question in flight, `enter` settles it and hands the focus on, `q` leaves.
+  Both answers stay on screen while the other is being made, which is the point
+  of a screen over two consecutive prompts.
+  Any flag given, or either end of the terminal not interactive, and the command
+  line behaves exactly as before: **a prompt nobody can answer is a hang**, and
+  the evaluator's `npm start -- --spec … --output …` must reach the graph
+  untouched. The output directory is **not** asked for as free text — it is a
+  fresh `runs/app-<timestamp>`, because `prepare` merges into a directory that is
+  not empty (T-21) and a typed path is where that costs someone their work.
+
+  **The live screen.** On a terminal the run is drawn on the **alternate
+  buffer**: the facts and the plan on the left — run id, provider, model, cache,
+  status, position, a progress bar, elapsed, an estimate of what is left, cost,
+  and one row per task with its own clock and its own spend — and the log on the
+  right, wrapped to its pane, scrollable with the arrows and the page keys.
+  `q` stops the run: the graph is given an `AbortSignal` through the same config
+  that carries the recursion limit, so the call in flight is cancelled rather
+  than paid for and discarded.
+
+  The alternate buffer is the whole reason a full-screen view is acceptable
+  here. The shell's scrollback is untouched while the run draws, and on the way
+  out the screen is handed back and **the entire log is replayed onto the normal
+  buffer** — the pretty view is for watching, the lines are what the reader
+  keeps. Nothing about the log's content changes: same `[node] event: detail`,
+  same order.
+
+  The estimate of what remains is a straight-line extrapolation of the pace so
+  far and is labelled as an estimate wherever it appears. Tasks are not the same
+  size, and a test task that runs the whole suite is not a component.
+
+  **Zero new dependencies:** no `chalk`, no `ora`, no `inquirer`. Raw ANSI
+  escapes, `process.stdin`'s raw mode and `setInterval` are the whole mechanism,
+  and every one of them is off unless the stream is a TTY. Colour is 256-colour,
+  not 24-bit: a terminal without truecolor renders a 24-bit escape wrong rather
+  than approximately. Every glyph is one cell from a plain Unicode block —
+  nothing from a patched font, which is not something a package manager can
+  install and which an unpatched terminal draws as a box.
 - **Acceptance criteria:**
   - [ ] The progress line shows position, task, elapsed time and cost to date
-  - [ ] `npm start ... | cat` produces output with no escape sequences
+  - [ ] `npm start … | cat` produces output with no escape sequences, and a run
+        with no terminal never waits for a keypress
   - [ ] `git diff` for this ticket adds no entry to `package.json`
-  - [ ] Every existing log line still appears, unchanged
+  - [ ] Every existing log line still appears, unchanged, and a run watched on
+        the live screen still leaves its whole log in the shell afterwards
+  - [ ] The frame fits the terminal it is given — every row inside the width,
+        every frame inside the height — at several sizes and in both palettes
+  - [ ] `q` reaches the graph as an abort, and the run reports that it was
+        stopped rather than that it finished
+  - [ ] A cancelled menu ends the process without calling a provider
+  - [ ] The terminal is left out of raw mode however the launcher exits
+  - [ ] Each specification is described by its own heading, so a new one needs
+        no table anywhere in the agent
+  - [ ] No glyph on screen requires a font the reader has to install
   - [ ] `npm run typecheck` exits 0 and `npm test` passes
-- **Note:** Optional, and last. The brief lists "a perfect UI" under what it is
-  not looking for; that is about the generated application, but the restraint
-  applies here too. Do this only if T-19 and T-20 are done and there is still
-  time. If it is skipped, nothing else is affected.
-- **Commit:** `feat(agent): show progress, elapsed time and cost while running`
+- **Note:** The brief lists "a perfect UI" under what it is not looking for;
+  that is about the generated application, and this ticket spends its restraint
+  elsewhere — the launcher and the live screen are ANSI escapes over stdout with
+  no dependency behind them, and both disappear the moment the output is not a
+  terminal. It depends on nothing but T-18 and can be taken in any order.
+
+  **Render the tasks in flight as a set, not as one task.** Today a level is
+  always one task wide, so a set of one prints exactly what a single task would
+  — but T-23 puts a whole level in flight at once, and a progress line written
+  around a single current task has to be rewritten then. Written as a set it
+  survives untouched. The same applies to the position counter: count tasks
+  finished out of tasks planned, which stays true whatever runs concurrently.
+
+  **What is testable here is not what is on screen.** Every layout decision is a
+  pure function from a view and a size to a string, so the tests assert the
+  frame itself — that no row overflows the width at any size, that the newest
+  lines are the ones shown until the reader scrolls, that a stopped run does not
+  claim to be running — alongside the key decoding, the selection arithmetic and
+  the per-task clocks. What is left untested is the terminal itself: nothing
+  here drives a real TTY, and no test spends a token.
+- **Commit:** `feat(agent): add an interactive launcher and a live progress line`
+
+---
+
+### T-23 — Generate a whole topological level concurrently
+
+- **Why:** A full run of `specs/car-inventory.md` takes 32 minutes of wall clock
+  for 25 model calls, and almost all of that is waiting on a provider. Tasks at
+  the same topological depth are independent **by construction**: their
+  `dependsOn` sets are disjoint from each other, and the planner guarantees one
+  task writes one file, so the calls that produce them can be in flight at once
+  without any of them observing another's work.
+
+  The committed plans say what that is worth. Grouping each plan's tasks by
+  depth over its own `dependsOn` edges:
+
+  - `car-inventory.md` — 15 planned tasks in **5 levels**, widths 6, 2, 1, 1, 5.
+  - `variant.md` — 18 planned tasks in **7 levels**, widths 3, 3, 3, 1, 1, 6, 1.
+
+  So generation goes from 15 sequential rounds to 5, and from 18 to 7 — a
+  ceiling of about 3x on the part of the run that is spent waiting. The five
+  test tasks the README already cites as 27.8% of the tasks and 59.4% of the
+  output all sit in one level, level 5 of the variant plan. Sequential execution
+  was chosen deliberately for the auditable trace, and the README publishes the
+  measurement that says what it costs. This ticket collects it.
+- **Depends on:** T-19
+- **Files:** `agent/src/nodes/generate.ts`, `agent/src/graph/routers.ts`,
+  `agent/src/graph/state.ts`, `agent/src/graph/index.ts`,
+  `agent/src/nodes/__tests__/generate.test.ts`,
+  `agent/src/graph/__tests__/routers.test.ts`, `docs/ARCHITECTURE.md`,
+  `README.md`
+- **Scope:** **Parallelise the model calls, not the state machine.** `generate`
+  visits a level rather than a task: it issues one call per task in the level
+  concurrently, writes each answer to the task's own path, and returns. Nothing
+  else becomes concurrent. `validate` still runs once per visit, and `repair`
+  still handles one task at a time — which is what keeps the failure path the
+  one already proved by four runs.
+
+  **`order` does not produce levels today and this ticket has to make it.**
+  `order.ts` runs Kahn's algorithm and pushes one id at a time into a flat
+  `orderedTaskIds`, and `cursor` is an index into that list. Levels come out of
+  the same algorithm by draining the whole ready set each round instead of one
+  node from it, which is a change to the loop and not to the algorithm. Decide
+  and state whether `orderedTaskIds` becomes `string[][]` or a second field
+  appears beside it; the flat list is read by `routeAfterOrder`, `taskInFlight`
+  and the log line, so whichever way it goes, every reader moves with it.
+  `RECURSION_LIMIT` also falls: its `MAX_PLAN_TASKS * STEPS_PER_TASK` term is
+  counted per task and a level is now one visit, so recompute it and say what
+  the new bound means.
+
+  Three invariants have to survive, and each has an owner today:
+
+  - **Attribution.** `attributable` matches `error.file` against
+    `task.targetPath`. It generalises to a level unchanged *because* one task
+    owns one file; assert that rather than assume it.
+  - **Rollback.** A snapshot is per file, so rolling one task back inside a
+    level touches nothing another task in that level wrote. The `surface`
+    manifest must stay consistent with disk for **every** task in the level,
+    which is the bug T-15 fixed for one.
+  - **Repair budgets.** `MAX_REPAIRS_PER_TASK` and `MAX_REPAIRS_PER_RUN` are
+    counted per task and per run, neither of which a level changes. `taskInFlight`
+    does change, and is the function to redesign first.
+
+  Does **not** parallelise `validate`, `repair` or `review`. Does **not** add a
+  concurrency library — `Promise.all` over the level is the whole mechanism.
+  Does **not** change the plan, the ordering, or any prompt.
+- **Acceptance criteria:**
+  - [ ] Tasks in one topological level are generated concurrently; tasks in
+        different levels are not
+  - [ ] A failure inside a level rolls back only its own task's file, proved by
+        a test with two tasks in one level where one fails
+  - [ ] The log still attributes every line to a task, so a reader can
+        reconstruct what happened without knowing the level boundaries
+  - [ ] A real run of `specs/car-inventory.md` is measured against the committed
+        32-minute baseline and the figure is published, whatever it says
+  - [ ] The run's cost is reported beside the time, including the cache-write
+        effect described below
+  - [ ] `npm run typecheck` exits 0 and `npm test` passes
+- **Note:** One cost is predictable and should be measured rather than
+  discovered: the prompt cache's breakpoint is written by the first call that
+  sends the prefix and read by every later one. Concurrent calls in the first
+  level all start before any of them has written the entry, so some of them pay
+  a cache **write** at 1.25x instead of a read at 0.1x. On the committed run the
+  prefix is 4,867 tokens, so the ceiling on this is small — but publish it,
+  because a speed-up that quietly costs money is the kind of tradeoff this
+  repository documents rather than hides.
+- **Commit:** `perf(agent): generate a topological level concurrently`
+
+---
+
+### T-24 — Give the planner a policy for a specification it cannot trust
+
+- **Why:** Of the three prompts the agent ships, the planner is the only one
+  with no instruction for what to do when the input is incomplete, ambiguous or
+  false. `CODER_SYSTEM` has one — *"a name you were not given does not exist …
+  use the closest thing you were given rather than inventing the name you
+  expected to find"* — and `REVIEWER_SYSTEM` has a strong one, in the whole
+  *what is not a gap* block. `PLANNER_SYSTEM` has rules for decomposition and
+  for what each field means, and nothing for uncertainty. That gap was reached
+  in practice: `specs/variant.md` opens by stating that the collection already
+  sits behind the project's GraphQL API, and what sits there is cars. The
+  planner improvised a defensible answer — adapt at the hook boundary — with no
+  rule telling it to, which means the next false premise gets whatever the model
+  finds plausible that day. Addresses Prompt Engineering.
+- **Depends on:** none
+- **Files:** `agent/src/prompts/planner.ts`,
+  `agent/src/prompts/__tests__/planner.test.ts`,
+  `agent/src/prompts/__tests__/packs.test.ts` (if the domain-vocabulary scan
+  needs extending), `docs/ARCHITECTURE.md`
+- **Scope:** Add one block to `PLANNER_SYSTEM` stating what to do when the
+  specification and the project disagree, when a requirement is too vague to
+  produce a checkable `acceptance` statement, and when the specification asks
+  for something the surface cannot support. The policy has to be **actionable
+  inside a schema that only returns tasks** — the planner cannot ask a question,
+  so "ask" is not an available behaviour, and a rule that names an impossible
+  action is worse than none. Prefer: adapt at the boundary and record the
+  adaptation in the task's `description`, rather than invent a second source of
+  truth or silently drop the requirement. Does **not** change the schema, the
+  decomposition rules, or any other prompt.
+- **Acceptance criteria:**
+  - [ ] The new block names a behaviour the planner can actually perform under
+        its schema
+  - [ ] No domain vocabulary is introduced —
+        `agent/src/__tests__/no-domain-vocabulary.test.ts` still passes
+  - [ ] A test asserts the block is present in the system prompt, so a later
+        edit cannot drop it silently
+  - [ ] `npm run typecheck` exits 0 and `npm test` passes
+- **Note:** Found by auditing the three shipped prompts against the seven-part
+  prompt structure taught in the author's coursework: objective, context, data,
+  rules, examples, format, uncertainty policy and quality criteria. The coder
+  covers all of them, the reviewer all but the worked example, and the planner
+  is missing the uncertainty policy — the one the course singles out as the
+  difference between a professional prompt and an amateur one, because without
+  it a model meeting a gap produces the most plausible continuation, which is to
+  say it invents.
+- **Commit:** `fix(agent): tell the planner what to do with a specification it cannot trust`

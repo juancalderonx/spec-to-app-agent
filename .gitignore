@@ -21,5 +21,9 @@ dist/
 # re-run cheaper — there is no response cache, and the prompt cache needs a key
 # like every other call.
 
+# Where an interactive run writes when nobody passed --output. The application
+# a reader is meant to inspect is generated-app/; this is scratch.
+runs/
+
 # TypeScript build cache
 *.tsbuildinfo
