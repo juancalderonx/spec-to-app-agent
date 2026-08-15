@@ -782,3 +782,174 @@ the architecture document says why it is shaped that way.
         run
   - [ ] No file in the repository contains a language other than English
 - **Commit:** `docs: add README with architecture, tradeoffs and cost`
+
+---
+
+## Post-submission tickets
+
+T-01 through T-18 are the submission. What follows are defects the completed
+runs exposed, written up as tickets because they were found with evidence and
+should be fixed the same way everything else was, not patched in a hurry before
+a tag. **T-19 and T-20 are worth doing; T-21 and T-22 are optional and say so.**
+Nothing here is a prerequisite for tagging: T-18 records each of them in the
+README's *what I would improve* section, so an unfixed defect is disclosed
+rather than hidden.
+
+---
+
+### T-19 — Tell a truncated answer from a wrong one, and stop shipping local paths
+
+- **Why:** `MAX_OUTPUT_TOKENS` in `agent/src/llm/factory.ts:58` is 16,000, and
+  the provider comparison run hit it four times in a row. In
+  `agent/runs/2026-08-14T22-54-34-766Z/usage.json`, `test-sort` and
+  `remediation-1-1` each emitted exactly 16,000 output tokens twice, while the
+  three test tasks that succeeded had already reached 67%, 83% and 95% of the
+  same ceiling — so this is the tail of a distribution the run was sitting in,
+  not an outlier. Every one of those four answers arrived as *the answer carried
+  no "contents" field*, which is the same sentence a refusal and a wrong-shaped
+  object produce. The schema retry added in T-13B therefore re-asked a question
+  whose answer could never fit, and the run paid four ceilings — roughly $1.60 —
+  to lose a requirement. `digestAnswer` already documents this hole in its own
+  comment: it names "a response cut off mid-generation" as one of three cases it
+  cannot separate. Addresses Implementation Quality and Output Quality.
+- **Depends on:** T-18
+- **Files:** `agent/src/llm/factory.ts`, `agent/src/schema/file.ts`,
+  `agent/src/nodes/generate.ts`, `agent/src/nodes/repair.ts`,
+  `agent/src/nodes/__tests__/generate.test.ts`,
+  `agent/src/llm/__tests__/factory.test.ts`, `agent/src/tools/trace.ts`,
+  `docs/ARCHITECTURE.md`
+- **Scope:** Two changes, both small, neither depending on the other.
+
+  **The ceiling.** `invokeStructured` already receives the raw message and
+  currently keeps only its usage. Surface the stop signal from it —
+  `stop_reason` on the native adapter, `finish_reason` on the OpenAI-compatible
+  one — as an optional field on `StructuredResponse`. **Read the field names off
+  the installed adapters; do not infer one provider's from the other's.** A
+  truncated answer must be reported as truncated, must not consume a schema
+  retry, and must not be retried with the same request, which produces the same
+  truncation. Then raise the ceiling, and justify the new number from the
+  measured distribution above rather than picking a round one.
+
+  **The trace.** `generate.ts:104` traces `resolvePath` with the resolved
+  absolute path in `detail`, so every committed `tools.jsonl` carries the
+  machine it ran on: 37 lines of the author's home directory in the T-15 run,
+  and `/private/tmp/...` in the T-17 runs. Record the path relative to the
+  output directory instead.
+- **Acceptance criteria:**
+  - [ ] A truncated structured answer is distinguishable from a malformed one
+        in the log, and the two produce different messages
+  - [ ] A truncated answer does not spend a schema retry on an identical request
+  - [ ] Both providers' stop signals are covered by a test using a fake response,
+        so no acceptance criterion here requires a paid run
+  - [ ] The new ceiling is stated with the evidence for it in a comment
+  - [ ] No `detail` field in a newly written `tools.jsonl` is an absolute path
+  - [ ] `npm run typecheck` exits 0 and `npm test` passes
+- **Note:** Two defects in one ticket because each is under an hour and both
+  touch the same call path; the commit body carries both, separately. Add the
+  truncation field as **optional** — six test fakes implement
+  `StructuredResponse` by hand and a required field breaks all of them for no
+  benefit. Do **not** hand-edit the already-committed `tools.jsonl` files: they
+  are the record of runs that happened, and the fix is for the runs that come
+  next.
+- **Commit:** `fix(agent): detect a truncated answer instead of blaming the model`
+
+---
+
+### T-20 — Cross-check GraphQL operations against the mock handlers
+
+- **Why:** The most dangerous defect the runs exposed is the one no signal
+  reports. The generated tests mock above the network with `MockedProvider`, so
+  MSW never receives a request and never raises the unhandled-operation error
+  the boilerplate arms it with. An operation declared in `src/graphql/queries.ts`
+  with no handler in `src/mocks/handlers.ts` leaves the type check clean, the
+  suite green and the exit code at zero, and surfaces only as the application's
+  error state in a browser. T-16 found this and `docs/generalization.md` records
+  it; nothing checks it. Addresses Output Quality.
+- **Depends on:** T-18
+- **Files:** `agent/src/validate/operations.ts` (new),
+  `agent/src/validate/__tests__/operations.test.ts` (new),
+  `agent/src/nodes/review.ts`, `docs/ARCHITECTURE.md`
+- **Scope:** A deterministic check, run once in `review` before the model is
+  called, whose result is given to the reviewer as a fact rather than left for
+  it to notice. Read the operation names declared in the project's query module
+  (`query X` / `mutation X` inside the `gql` templates) and the names the mock
+  module handles (`graphql.query("X")` / `graphql.mutation("X")`); every
+  declared operation with no handler is a gap. The reviewer already queues
+  remediation tasks for gaps, so the gap reaches the existing repair path
+  without a new mechanism. Does **not** add a GraphQL parser or any other
+  dependency — the two shapes above are the ones the boilerplate uses and the
+  ones the agent writes. Does **not** check the reverse direction: a handler
+  with no operation is unused, not broken.
+- **Acceptance criteria:**
+  - [ ] An operation with no handler is reported as a gap, proved by a fixture
+  - [ ] A project where every operation has a handler reports nothing
+  - [ ] A project whose query or mock module is absent reports nothing and does
+        not fail — the check is an addition, not a new way to break a run
+  - [ ] The check makes no model call and adds no dependency
+  - [ ] `npm run typecheck` exits 0 and `npm test` passes
+- **Note:** The check is textual and its ceiling should be written where it
+  lives: an operation named through a variable, or a handler registered in a
+  loop, is invisible to it. That is acceptable for a check that costs nothing
+  and catches the case that actually occurred, but it has to be stated rather
+  than discovered.
+- **Commit:** `fix(agent): report a query the mock layer cannot answer`
+
+---
+
+### T-21 — Refuse an output directory that is not empty (optional)
+
+- **Why:** `prepare` copies the boilerplate with `fs.cp` and never clears the
+  destination, and only two reference files are removed. Running a second time
+  into the same directory therefore merges the new run on top of the old one:
+  stale components stay on disk, `readSurface` reports them, and the type
+  checker compiles them. The committed `generated-app/` makes this reachable
+  from a fresh clone, because the README's quick start used to point there.
+  T-18 documents the trap; this closes it. Addresses Implementation Quality.
+- **Depends on:** T-18
+- **Files:** `agent/src/nodes/prepare.ts`,
+  `agent/src/nodes/__tests__/prepare.test.ts`, `README.md`
+- **Scope:** If the output directory exists and is not empty, record a setup
+  failure and let the graph reach `report` — the path `prepare` already has for
+  a failed install. **Refuse; do not delete.** `--output` is user-supplied, and
+  a recursive delete on a user-supplied path is a way to lose someone's work
+  that no guard list fully closes. Once this exists, the README's quick start
+  can point at a fresh directory and say why in one line.
+- **Acceptance criteria:**
+  - [ ] A run into a non-empty directory fails at `prepare` with a message
+        naming the directory, and spends nothing on the provider
+  - [ ] A run into a missing or empty directory is unaffected
+  - [ ] No code path in this ticket deletes a file outside the sandbox
+  - [ ] `npm run typecheck` exits 0 and `npm test` passes
+- **Commit:** `fix(agent): refuse to build on top of a previous run`
+
+---
+
+### T-22 — Make a run legible while it is running (optional)
+
+- **Why:** A run takes around twenty-five minutes and prints a flat stream of
+  `[node] event: detail` lines. Nothing says which task of how many is in
+  flight, how long it has taken, or what it has cost so far — all three are
+  already in state and none of them are shown. This is also what makes a short
+  terminal recording usable in the README, which is the only way a reader sees
+  the agent work without spending their own credit. Addresses Documentation.
+- **Depends on:** T-18
+- **Files:** `agent/src/cli.ts`, `agent/src/cli/progress.ts` (new),
+  `agent/src/cli/__tests__/progress.test.ts` (new)
+- **Scope:** Add a progress line carrying task position (`7/14`), the task in
+  flight, elapsed time, and accumulated cost from the ledger already in state.
+  Colour with raw ANSI escapes and **only when `process.stdout.isTTY`** — piped
+  to a file the output stays plain, which is the constraint that keeps this from
+  being decoration. **Zero new dependencies:** no `chalk`, no `ora`, no spinner
+  library. Does **not** take over the screen, redraw, or hide the log lines —
+  the streamed log is the run's evidence and stays.
+- **Acceptance criteria:**
+  - [ ] The progress line shows position, task, elapsed time and cost to date
+  - [ ] `npm start ... | cat` produces output with no escape sequences
+  - [ ] `git diff` for this ticket adds no entry to `package.json`
+  - [ ] Every existing log line still appears, unchanged
+  - [ ] `npm run typecheck` exits 0 and `npm test` passes
+- **Note:** Optional, and last. The brief lists "a perfect UI" under what it is
+  not looking for; that is about the generated application, but the restraint
+  applies here too. Do this only if T-19 and T-20 are done and there is still
+  time. If it is skipped, nothing else is affected.
+- **Commit:** `feat(agent): show progress, elapsed time and cost while running`
