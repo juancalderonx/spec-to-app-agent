@@ -20,3 +20,6 @@ dist/
 # reader inspect a real run without a key of their own. They do not make a
 # re-run cheaper — there is no response cache, and the prompt cache needs a key
 # like every other call.
+
+# TypeScript build cache
+*.tsbuildinfo
