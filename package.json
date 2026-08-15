@@ -11,6 +11,7 @@
     "start": "node --env-file-if-exists=.env agent/src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test 'agent/src/**/*.test.ts'",
+    "graph:png": "node --input-type=module -e \"const { writeFile } = await import('node:fs/promises'); const { buildGraph } = await import('./agent/src/graph/index.ts'); const blob = await (await buildGraph().getGraphAsync()).drawMermaidPng(); await writeFile('docs/graph.png', Buffer.from(await blob.arrayBuffer())); console.log('docs/graph.png')\"",
     "graph:mermaid": "node --input-type=module -e \"const { buildGraph } = await import('./agent/src/graph/index.ts'); console.log((await buildGraph().getGraphAsync()).drawMermaid())\""
   },
   "dependencies": {

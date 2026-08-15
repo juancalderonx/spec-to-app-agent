@@ -13,47 +13,42 @@ disappears with it.
 
 ## 1. The graph
 
-> This diagram is drawn by hand for now. Once the graph exists in code it is
-> replaced by the output of `npm run graph:mermaid`, which renders the compiled
-> graph via `getGraphAsync().drawMermaid()`. A diagram generated from the code
-> cannot drift away from it; a hand-drawn one can.
+> `docs/graph.png` is written by `npm run graph:png`, which renders the
+> *compiled* graph through `getGraphAsync().drawMermaidPng()`. A diagram
+> generated from the code cannot drift away from it; a hand-drawn one can, and
+> this one did until T-18 replaced it.
+>
+> **Committed as an image rather than as a mermaid block on purpose.** The
+> library's mermaid output is valid — it parses on every version from 8 to 11 —
+> but whether it becomes a picture depends on the renderer the reader happens to
+> have, and one of them rejected it outright. A diagram whose visibility is a
+> property of the viewer is not a diagram.
+>
+> Two costs, both real. The image is a binary, so an edge change is invisible in
+> a diff. And `drawMermaidPng` renders nothing locally: `graph_mermaid.js`
+> base64-encodes the syntax into a `https://mermaid.ink/img/…` URL and fetches
+> it, so regenerating the diagram requires a network call to a third party and
+> sends it the node names and the edge list. Both are why `npm run graph:mermaid`
+> stays: it is the diffable form of the same graph *and* the offline one, and a
+> claim that the diagram is verifiable against the code should not rest on a
+> service being up.
 
-```mermaid
-flowchart TD
-    START([START]) --> prepare
-    prepare[prepare<br/><i>copy · clean · install · read surface</i>] --> plan
-    plan[plan<br/><i>spec → task graph</i>] --> order
-    order[order<br/><i>topological sort</i>]
+![The compiled agent graph: START into prepare, then plan, order, generate, validate, with conditional edges to repair, review and report, and report into END.](graph.png)
 
-    order -->|cycle or empty plan| report
-    order -->|ordered| generate
+**Reading it.** Solid arrows are unconditional edges. The nine dotted arrows are
+the conditional ones, and each is decided by a pure function of state:
+`routeAfterPrepare`, plus the three routers set out below. Which nodes call a
+model is not something a generated diagram can say, so it is stated here rather
+than drawn.
 
-    generate[generate<br/><i>one task per visit</i>] --> validate
-    repair[repair<br/><i>structured errors → rewrite</i>] --> validate
-    validate[validate<br/><i>typecheck + tests</i>]
-
-    validate -->|errors in its own file · budget left| repair
-    validate -->|errors · budget spent<br/><i>validate rolled back and marked failed</i>| generate
-    validate -->|errors it does not own<br/><i>advanced, not blamed</i>| generate
-    validate -->|clean<br/><i>validate marked done</i>| generate
-    validate -->|clean · queue empty| review
-
-    review[review<br/><i>secondary model checks coverage</i>]
-    review -->|gaps found · round available| generate
-    review -->|no gaps or round spent| report
-
-    report[report<br/><i>artifacts · token ledger · cost</i>] --> DONE([END])
-
-    classDef llm fill:#e8def8,stroke:#6750a4,stroke-width:2px
-    classDef code fill:#e6f4ea,stroke:#2e7d32,stroke-width:2px
-    class plan,generate,repair,review llm
-    class prepare,order,validate,report code
-```
-
-Green nodes are deterministic TypeScript. Purple nodes call a model. Three of
-the eight nodes never talk to a model, and that is the point: `order`,
-`validate` and `report` are the guarantees, and they are first-class boxes in
-the diagram rather than helpers hidden inside another node.
+Four of the eight nodes never talk to a model: `prepare`, `order`, `validate`
+and `report`. Three of those four are the guarantees — ordering, validation and
+accounting — and they are first-class boxes rather than helpers hidden inside
+another node, which is the whole reason the graph has eight nodes instead of
+four. What the diagram cannot show is that the single dotted arrow from
+`validate` back to `generate` carries three different situations — a task rolled
+back and failed, a task advanced past because the breakage is not its own, and a
+task validated clean. `routeAfterValidate`, below, is where they are told apart.
 
 ### Why these eight
 
@@ -508,7 +503,7 @@ is a decision that was not examined.
 |---|---|---|---|
 | **LangGraph for orchestration** | A plain `while` loop over a queue | The graph is declarative: nodes and edges can be read without tracing control flow, and the README's diagram is **rendered from the compiled graph**, so it cannot describe an architecture the code does not have. | Roughly fifty transitive dependencies, and a hand-written loop would have been faster to write and lower-risk on the evaluator's machine. The plain loop wins on weight, speed and risk; it was rejected only because the decomposition is 30% of the score and needs to be legible from outside. |
 | **LangChain limited to three things** — provider selection, schema-validated output, token usage | Prebuilt ReAct agents, memory, retrievers, vector stores, `.pipe()` chains | A prebuilt agent moves decomposition and control flow into the framework. Those are exactly the parts being assessed; delegating them removes the evidence of designing them. | Some of the loop is hand-written that a prebuilt agent would have supplied. That is the intended cost, not a side effect. |
-| **`MemorySaver` as checkpointer** | `@langchain/langgraph-checkpoint-sqlite` | The SQLite checkpointer pulls in a native module that compiles against Node's ABI. The installed runtime is newer than what these libraries target, making it the most likely thing to fail on a machine that is not this one. | Resume across process restarts. An interrupted run starts from the beginning and pays for every call again: nothing it produced survives the process. |
+| **No checkpointer at all** — `buildGraph()` compiles without one | `MemorySaver`, or `@langchain/langgraph-checkpoint-sqlite` | Wins on install risk, and `MemorySaver` wins nothing to trade against it: it holds checkpoints in the process's own memory, so it survives exactly as long as the single `stream()` call that a run already is. The SQLite one would survive a restart, and pulls in a native module that compiles against Node's ABI — the most likely thing in this dependency tree to fail on a machine that is not this one. | Resume across process restarts. An interrupted run starts from the beginning and pays for every call again. What survives a killed process is what `plan` and the trace already wrote to `agent/runs/<runId>/`, which is a record, not a resume point. |
 | **The provider's prompt cache is the only cache** | A response cache on disk, keyed by model + prompt + schema | The brief states the evaluator supplies their own key, so a keyless replay is owed to nobody, and the artifacts of the committed run are already free to read. A disk cache would buy cheaper development runs at the price of cache files in the repository and stale entries that mask a prompt change. `--cache` therefore switches the cache that exists — the breakpoint on the stable prefix — which is also what lets its saving be measured against a run without it rather than asserted. | Re-running costs a full run. Nothing here makes a second execution of the same specification cheaper than the first. |
 | **Execution order computed in code** | Asking the model for an ordered list | Ordering is a guarantee, not a judgement. Kahn's algorithm cannot return a cyclic order, and a model cannot promise that. It also makes the order reproducible across runs of the same plan. | Nothing functional. The model still decides the dependency edges — the semantics — which is the part it is good at. |
 | **Signatures between tasks, not file bodies** | Passing already-generated files | Keeps per-task prompt size flat and makes the claim checkable against the ledger. See section 4. | The model cannot see implementation details of its dependencies. If a task genuinely needs one, that is a signal the interface is wrong. |

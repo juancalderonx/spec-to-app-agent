@@ -15,6 +15,8 @@ dist/
 .DS_Store
 
 # Note: generated-app/ and agent/runs/ are intentionally NOT ignored.
-# The generated application and the run artifacts (plan, tool trace, token
-# ledger, response cache) are part of the deliverable: they let the output be
-# inspected and replayed without spending API credit.
+# The generated application and the run artifacts (plan, tool trace, error log,
+# token ledger, summary) are part of the deliverable: they are what lets a
+# reader inspect a real run without a key of their own. They do not make a
+# re-run cheaper — there is no response cache, and the prompt cache needs a key
+# like every other call.
